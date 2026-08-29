@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GLM Worker Dashboard</title>
+<style>
+:root {
+  --bg: #101418;
+  --panel: #1a2028;
+  --text: #d8dee6;
+  --accent: #4fa3ff;
+  --ok: #3fb96d;
+  --error: #e05555;
+  --thinking: #d9a53f;
+  --code-bg: #0f1217;
+}
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  margin: 0;
+  padding: 10px;
+  font-size: 14px;
+}
+header {
+  background-color: var(--panel);
+  padding: 15px 20px;
+  border-radius: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.status-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--error); margin-right: 8px; display: inline-block;
+}
+.status-dot.online { background: var(--ok); }
+.sub-header {
+  font-size: 12px; color: #888; margin-top: 4px;
+}
+.section-title {
+  font-size: 15px; font-weight: 600; margin-bottom: 10px; color: var(--text); border-left: 3px solid var(--accent); padding-left: 10px;
+}
+.card {
+  background-color: var(--panel);
+  padding: 12px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+  border: 1px solid #253040;
+}
+.active-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 10px;
+}
+.worker-card {
+  padding: 10px;
+}
+.label { font-weight: bold; font-size: 15px; display: flex; justify-content: space-between; margin-bottom: 5px; }
+.phase-badge {
+  font-size: 11px; padding: 2px 6px; border-radius: 3px; background: #333; color: #ccc; text-transform: uppercase;
+}
+.phase-thinking { background: var(--thinking); color: #000; }
+.phase-answering { background: var(--accent); color: #000; }
+.phase-starting { background: #555; }
+.preview { font-size: 12px; color: #888; margin-bottom: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.console-box {
+  background: var(--code-bg); border: 1px solid #253040; border-radius: 3px; font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.4;
+  max-height: 180px; overflow-y: auto; padding: 8px; margin-top: 8px;
+}
+.console-box.reasoning { color: var(--thinking); opacity: 0.85; }
+.console-box.content { color: var(--text); }
+.totals-grid {
+  display: flex; gap: 15px; flex-wrap: wrap; margin-bottom: 15px;
+}
+.stat-box {
+  flex: 1; min-width: 100px; background: var(--panel); padding: 10px; border-radius: 4px; text-align: center; border: 1px solid #253040;
+}
+.stat-val { font-size: 20px; font-weight: bold; color: var(--accent); margin: 5px 0; }
+.stat-label { font-size: 12px; color: #888; }
+.bar-container { width: 100%; height: 8px; background: #333; border-radius: 4px; margin-top: 10px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); border-radius: 4px; transition: width 0.5s; }
+.history-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.history-table th { text-align: left; padding: 8px; border-bottom: 2px solid #253040; color: #888; }
+.history-table td { padding: 8px; border-bottom: 1px solid #253040; cursor: pointer; }
+.history-table tr:hover { background: rgba(255,255,255,0.05); }
+.history-table tr.hidden { display: none; }
+.detail-row { background: rgba(0,0,0,0.2); }
+.detail-content { padding: 10px; }
+details { margin-bottom: 5px; }
+details summary { cursor: pointer; color: var(--accent); font-size: 12px; list-style: none; }
+details summary::after { content: ' [+]'; font-size: 10px; color: #888; }
+details[open] summary::after { content: ' [-]'; }
+details[open] summary { margin-bottom: 8px; }
+.code-block { background: var(--code-bg); padding: 8px; border-radius: 3px; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all; color: var(--text); }
+.code-block.reasoning { color: var(--thinking); }
+.code-block.error { color: var(--error); }
+.code-block.system { color: var(--accent); }
+.no-data { color: #555; font-style: italic; font-size: 13px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>GLM Worker Dashboard</h1>
+    <div class="sub-header"><span class="status-dot" id="status-dot"></span><span id="header-status">Checking connectivity...</span></div>
+  </div>
+  <div id="gpu-stats" style="text-align: right;">
+    <span id="gpu-util">--%</span> | <span id="gpu-vram">--/--</span> | <span id="gpu-temp">--°C</span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <div class="section-title">Active Workers</div>
+    <div class="active-grid" id="active-workers">
+      <div class="no-data">No active workers</div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">Totals</div>
+    <div class="totals-grid">
+      <div class="stat-box">
+        <div class="stat-label">Total Calls</div>
+        <div class="stat-val" id="stat-calls">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Prompt Tokens</div>
+        <div class="stat-val" id="stat-pt">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Completion Tokens</div>
+        <div class="stat-val" id="stat-ct">0</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-label">Avg TPS</div>
+        <div class="stat-val" id="stat-tps">0.0</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="section-title" style="font-size: 13px; margin-bottom: 8px;">Tokens by Label (Top 8)</div>
+      <div id="label-bars"></div>
+    </div>
+    <div class="card">
+      <div class="section-title" style="font-size: 13px; margin-bottom: 8px;">Fable (Claude) &amp; Agents — this project</div>
+      <div class="totals-grid" style="margin-bottom:0;">
+        <div class="stat-box"><div class="stat-label">Input Tokens</div><div class="stat-val" id="fable-in">–</div></div>
+        <div class="stat-box"><div class="stat-label">Output Tokens</div><div class="stat-val" id="fable-out">–</div></div>
+        <div class="stat-box"><div class="stat-label">Cache Reads</div><div class="stat-val" id="fable-cache">–</div></div>
+        <div class="stat-box"><div class="stat-label">Agent Transcripts</div><div class="stat-val" id="fable-agents">–</div></div>
+        <div class="stat-box"><div class="stat-label">Workflows</div><div class="stat-val" id="fable-wf">–</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-title">History</div>
+    <div style="overflow-x: auto;">
+      <table class="history-table">
+        <thead>
+          <tr>
+            <th>Start</th>
+            <th>Label</th>
+            <th>Status</th>
+            <th>Duration</th>
+            <th>Prompt Tok</th>
+            <th>Completion Tok</th>
+            <th>TPS</th>
+          </tr>
+        </thead>
+        <tbody id="history-body">
+          <!-- Rows inserted by JS -->
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+const API = '/api';
+let state = {
+  live: [],
+  slots: [],
+  log: [],
+  gpu: {},
+  online: false
+};
+
+function formatNum(n) {
+  return (n || 0).toLocaleString();
+}
+
+function formatTime(ts) {
+  return new Date(ts).toLocaleTimeString();
+}
+
+function getPrefix(label) {
+  if (!label) return 'Unknown';
+  return label.split(':')[0] || label;
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function updateHeader() {
+  const statusEl = document.getElementById('header-status');
+  const dot = document.getElementById('status-dot');
+
+  if (state.online) {
+    dot.classList.add('online');
+    const busy = state.slots.filter(s => s.is_processing).length;
+    const byW = {};
+    state.slots.forEach(s => { const w = s.worker || 'local'; byW[w] = byW[w] || [0,0]; byW[w][1]++; if (s.is_processing) byW[w][0]++; });
+    statusEl.innerText = `${busy}/${state.slots.length} busy — ` + Object.entries(byW).map(([w,c]) => `${w} ${c[0]}/${c[1]}`).join(' · ');
+  } else {
+    dot.classList.remove('online');
+    statusEl.innerText = 'API UNREACHABLE';
+  }
+}
+
+function updateGPU() {
+  const gpu = state.gpu;
+  const utilEl = document.getElementById('gpu-util');
+  const vramEl = document.getElementById('gpu-vram');
+  const tempEl = document.getElementById('gpu-temp');
+  
+  if (gpu && Object.keys(gpu).length > 0) {
+    const util = gpu.util || 0;
+    const vram = (gpu.vram_used / 1024).toFixed(1);
+    const total = (gpu.vram_total / 1024).toFixed(1);
+    const temp = gpu.temp || 0;
+    
+    utilEl.innerText = `${util}%`;
+    vramEl.innerText = `${vram}/${total} GB`;
+    tempEl.innerText = `${temp}°C`;
+  } else {
+    utilEl.innerText = '--%';
+    vramEl.innerText = '--/--';
+    tempEl.innerText = '--°C';
+  }
+}
+
+function renderActiveWorkers() {
+  const container = document.getElementById('active-workers');
+  container.innerHTML = '';
+  
+  if (!state.online || state.live.length === 0) {
+    container.innerHTML = '<div class="no-data">No active workers</div>';
+    return;
+  }
+
+  state.live.forEach(w => {
+    const started = new Date(w.ts_start).getTime();
+    const elapsed = isNaN(started) ? '?' : ((Date.now() - started) / 1000).toFixed(1);
+    
+    let phaseClass = 'phase-starting';
+    if (w.phase === 'thinking') phaseClass = 'phase-thinking';
+    if (w.phase === 'answering') phaseClass = 'phase-answering';
+
+    const preview = w.prompt_preview ? escapeHtml(w.prompt_preview) : '';
+    
+    // Truncate streams to last 1200 chars
+    const reasoning = w.reasoning_so_far || '';
+    const reasoningTrunc = reasoning.length > 1200 ? '...' + reasoning.slice(-1200) : reasoning;
+    const rawContent = w.content_so_far || '';
+    const contentTrunc = rawContent.length > 1200 ? '...' + rawContent.slice(-1200) : rawContent;
+
+    const div = document.createElement('div');
+    div.className = 'card worker-card';
+    div.innerHTML = `
+      <div class="label">
+        <span>${escapeHtml(w.label)}</span>
+        <span class="phase-badge ${phaseClass}">${escapeHtml(w.phase || '')}</span>
+      </div>
+      <div class="preview">"${preview}"</div>
+      <div style="font-size:11px; color:#888;">Elapsed: ${elapsed}s</div>
+      <div class="console-box reasoning">${escapeHtml(reasoningTrunc)}</div>
+      <div class="console-box content">${escapeHtml(contentTrunc)}</div>
+    `;
+    container.appendChild(div);
+    div.querySelectorAll('.console-box').forEach(b => { b.scrollTop = b.scrollHeight; });
+  });
+}
+
+function renderTotals() {
+  // Stats
+  let totalCalls = 0;
+  let totalPrompt = 0;
+  let totalComp = 0;
+  let totalTps = 0;
+  let countTps = 0;
+
+  // Grouping for labels
+  const labelGroups = {};
+
+  state.log.forEach(log => {
+    totalCalls++;
+    totalPrompt += (log.prompt_tokens || 0);
+    totalComp += (log.completion_tokens || 0);
+    if (log.tps) {
+      totalTps += log.tps;
+      countTps++;
+    }
+
+    const prefix = getPrefix(log.label);
+    if (!labelGroups[prefix]) labelGroups[prefix] = 0;
+    labelGroups[prefix] += (log.completion_tokens || 0);
+  });
+
+  const avgTps = countTps > 0 ? (totalTps / countTps).toFixed(2) : '0.0';
+
+  document.getElementById('stat-calls').innerText = formatNum(totalCalls);
+  document.getElementById('stat-pt').innerText = formatNum(totalPrompt);
+  document.getElementById('stat-ct').innerText = formatNum(totalComp);
+  document.getElementById('stat-tps').innerText = avgTps;
+
+  // Label Bars
+  const barsContainer = document.getElementById('label-bars');
+  barsContainer.innerHTML = '';
+  
+  // Sort and take top 8
+  const sorted = Object.entries(labelGroups).sort((a,b) => b[1] - a[1]).slice(0, 8);
+  if (sorted.length === 0) {
+    barsContainer.innerHTML = '<div style="color:#555; font-size:13px;">No history yet</div>';
+    return;
+  }
+
+  const maxVal = sorted[0][1];
+  
+  sorted.forEach(([label, val]) => {
+    const pct = (val / maxVal) * 100;
+    const row = document.createElement('div');
+    row.style.marginBottom = '6px';
+    row.innerHTML = `
+      <div style="display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px;">
+        <span>${escapeHtml(label)}</span>
+        <span>${formatNum(val)}</span>
+      </div>
+      <div class="bar-container">
+        <div class="bar-fill" style="width:${pct}%"></div>
+      </div>
+    `;
+    barsContainer.appendChild(row);
+  });
+}
+
+let expandedIds = new Set();
+let lastLogSig = '';
+function renderHistory() {
+  // Skip rebuild when nothing changed, so expanded rows stay open
+  const sig = state.log.length + ':' + (state.log.length ? state.log[state.log.length - 1].id : '');
+  if (sig === lastLogSig) return;
+  lastLogSig = sig;
+
+  const tbody = document.getElementById('history-body');
+  tbody.innerHTML = '';
+
+  // Sort log by ts_start descending (ISO strings need Date conversion)
+  const sorted = [...state.log].sort((a,b) => new Date(b.ts_start) - new Date(a.ts_start));
+
+  sorted.forEach(log => {
+    const tr = document.createElement('tr');
+    
+    // Status color
+    let statusColor = '#888';
+    let statusText = 'ok';
+    if (log.status === 'error') {
+      statusColor = 'var(--error)';
+      statusText = 'error';
+    } else if (log.status === 'ok') {
+      statusColor = 'var(--ok)';
+      statusText = 'ok';
+    }
+
+    // Construct inner text for table cells to avoid HTML injection
+    tr.innerHTML = `
+      <td>${formatTime(log.ts_start)}</td>
+      <td>${escapeHtml(log.label)}</td>
+      <td style="color:${statusColor}; font-weight:bold;">${statusText}</td>
+      <td>${log.duration_s ? log.duration_s.toFixed(2) : '-'}</td>
+      <td>${formatNum(log.prompt_tokens)}</td>
+      <td>${formatNum(log.completion_tokens)}</td>
+      <td>${log.tps ? log.tps.toFixed(2) : '-'}</td>
+    `;
+
+    // Detail Row
+    const detailTr = document.createElement('tr');
+    detailTr.className = 'detail-row hidden';
+    
+    let promptHtml = '';
+    if (log.system) promptHtml += `<details><summary>System</summary><div class="code-block system">${escapeHtml(log.system)}</div></details>`;
+    if (log.prompt) promptHtml += `<details><summary>Prompt</summary><div class="code-block">${escapeHtml(log.prompt)}</div></details>`;
+    if (log.files && log.files.length > 0) promptHtml += `<details><summary>Files (${log.files.length})</summary><div style="font-size:12px; color:#888;">${escapeHtml(log.files.join(', '))}</div></details>`;
+
+    detailTr.innerHTML = `
+      <td colspan="7" style="padding:0;">
+        <div class="detail-content">
+          <details><summary>Prompt Details</summary>${promptHtml}</details>
+          <details><summary>Reasoning</summary><div class="code-block reasoning">${escapeHtml(log.reasoning || '(none)')}</div></details>
+          <details><summary>Answer</summary><div class="code-block">${escapeHtml(log.content || '(none)')}</div></details>
+        </div>
+      </td>
+    `;
+
+    // Interaction (persists across re-renders via expandedIds)
+    tr.addEventListener('click', () => {
+      detailTr.classList.toggle('hidden');
+      if (expandedIds.has(log.id)) expandedIds.delete(log.id); else expandedIds.add(log.id);
+    });
+    if (expandedIds.has(log.id)) detailTr.classList.remove('hidden');
+
+    tbody.appendChild(tr);
+    tbody.appendChild(detailTr);
+  });
+}
+
+async function fetchData() {
+  try {
+    // /api/slots checks connectivity
+    const slotsRes = await fetch(`${API}/slots`);
+    if (!slotsRes.ok) throw new Error('Slots fail');
+    state.slots = await slotsRes.json();
+    state.online = true;
+  } catch (e) {
+    state.slots = [];
+    state.online = false;
+  }
+
+  try {
+    const liveRes = await fetch(`${API}/live`);
+    state.live = await liveRes.json();
+  } catch (e) { state.live = []; }
+
+  try {
+    const logRes = await fetch(`${API}/log`);
+    state.log = await logRes.json();
+  } catch (e) { state.log = []; }
+
+}
+
+async function fetchGpu() {
+  try {
+    const gpuRes = await fetch(`${API}/gpu`);
+    state.gpu = await gpuRes.json();
+  } catch (e) { state.gpu = {}; }
+  updateGPU();
+}
+
+function updateUI() {
+  updateHeader();
+  renderActiveWorkers();
+  renderTotals();
+  renderHistory();
+}
+
+async function fetchFable() {
+  try {
+    const f = await (await fetch(`${API}/fable`)).json();
+    document.getElementById('fable-in').innerText = formatNum(f.input_tokens);
+    document.getElementById('fable-out').innerText = formatNum(f.output_tokens);
+    document.getElementById('fable-cache').innerText = formatNum(f.cache_read_tokens);
+    document.getElementById('fable-agents').innerText = formatNum(f.agent_transcripts);
+    document.getElementById('fable-wf').innerText = formatNum(f.workflows);
+  } catch (e) {}
+}
+
+// Polling loops: main data every 2s, GPU every 5s, Fable usage every 30s
+setInterval(async () => { await fetchData(); updateUI(); }, 2000);
+setInterval(fetchGpu, 5000);
+setInterval(fetchFable, 30000);
+fetchFable();
+
+// Initial run
+fetchData().then(updateUI);
+fetchGpu();
+
+</script>
+</body>
+</html>
