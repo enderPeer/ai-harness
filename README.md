@@ -80,8 +80,22 @@ opencode run --command ultra "port the queue to SSE"
 ```
 
 Subagents are reached through the task tool (`--agent` only selects primary
-agents). Editing is allowed, `bash` asks first — loosen it in the config if you
-want it fully autonomous.
+agents).
+
+Editing is allowed. `bash` is an allowlist: read-only inspection (`git status`,
+`git diff`, `grep`, `rg`, `ls`, `findstr`) runs unattended, everything else
+asks. That split exists because a headless `opencode run` has nobody to ask, so
+a plain `"ask"` silently auto-rejects — which killed the verification pass of
+`/ultra` until the allowlist went in.
+
+Two things about that allowlist, both learned the hard way. **Order matters and
+it is the reverse of what you expect**: the last matching rule wins, so the
+catch-all `"*": "ask"` must come *first* and the specific allows after it —
+written the other way round, the catch-all overrides every allow and nothing
+runs, while `opencode debug agent build` cheerfully lists all your rules as
+registered. And the patterns match the command string, so they stop accidents,
+not a determined shell chain; set `permission.bash` to `"allow"` only if you
+want it truly unattended.
 
 ## Components
 

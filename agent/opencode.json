@@ -1,34 +1,41 @@
 {
   "$schema": "https://opencode.ai/config.json",
-
   "model": "specht/glm-4.7-flash-131k",
   "small_model": "local4080/glm-4.7-flash",
-
   "provider": {
     "local4080": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "GLM-4.7-Flash — local RTX 4080",
-      "options": { "baseURL": "http://127.0.0.1:8080/v1" },
+      "name": "GLM-4.7-Flash \u2014 local RTX 4080",
+      "options": {
+        "baseURL": "http://127.0.0.1:8080/v1"
+      },
       "models": {
         "glm-4.7-flash": {
           "name": "GLM-4.7-Flash 32k (RTX 4080, ~136 tok/s)",
-          "limit": { "context": 32768, "output": 8192 }
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
         }
       }
     },
     "specht": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "GLM-4.7-Flash 131k — specht, 2x AMD",
-      "options": { "baseURL": "http://127.0.0.1:9088/v1" },
+      "name": "GLM-4.7-Flash 131k \u2014 specht, 2x AMD",
+      "options": {
+        "baseURL": "http://127.0.0.1:9088/v1"
+      },
       "models": {
         "glm-4.7-flash-131k": {
           "name": "GLM-4.7-Flash 131k (specht, both cards)",
-          "limit": { "context": 131072, "output": 32768 }
+          "limit": {
+            "context": 131072,
+            "output": 32768
+          }
         }
       }
     }
   },
-
   "mcp": {
     "cluster": {
       "type": "local",
@@ -39,14 +46,17 @@
       ]
     }
   },
-
   "agent": {
     "scout": {
       "mode": "subagent",
       "description": "Fast codebase search on the local 4080. Finds files, symbols and call sites and reports paths with line numbers. Use it instead of reading many files yourself.",
       "model": "local4080/glm-4.7-flash",
       "temperature": 0.2,
-      "permission": { "edit": "deny", "bash": "deny", "webfetch": "deny" },
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny"
+      },
       "prompt": "You are a code scout. Search the repository and report what you found as a short list of file:line references with one line of context each. Never edit anything. Never guess a path you have not seen in tool output."
     },
     "auditor": {
@@ -54,22 +64,42 @@
       "description": "Whole-file and whole-subsystem review using specht's 131k context. Reads large files end to end and reports concrete defects. Read-only.",
       "model": "specht/glm-4.7-flash-131k",
       "temperature": 0.1,
-      "permission": { "edit": "deny", "bash": "deny", "webfetch": "deny" },
-      "prompt": "You are a code auditor with a very large context window. Read the files you are given completely before judging. Report only defects you can point at with a file and line: correctness bugs first, then reuse and simplification. State the failing input or state for each. If you find nothing, say so — do not invent findings."
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny"
+      },
+      "prompt": "You are a code auditor with a very large context window. Read the files you are given completely before judging. Report only defects you can point at with a file and line: correctness bugs first, then reuse and simplification. State the failing input or state for each. If you find nothing, say so \u2014 do not invent findings."
     },
     "drafter": {
       "mode": "subagent",
-      "description": "Drafts self-contained artifacts on the local 4080 — a new module, a config, a plan, a test file. Returns the artifact in its reply; it does not edit the repository.",
+      "description": "Drafts self-contained artifacts on the local 4080 \u2014 a new module, a config, a plan, a test file. Returns the artifact in its reply; it does not edit the repository.",
       "model": "local4080/glm-4.7-flash",
       "temperature": 0.6,
-      "permission": { "edit": "deny", "bash": "deny", "webfetch": "deny" },
-      "prompt": "You draft self-contained artifacts: one complete file, plan or document per request, in a single fenced block. You are reliably good at writing new code from a clear spec, and unreliable at quoting existing code verbatim — so never reproduce an existing file you were not given in full, and say what you assumed instead of guessing."
+      "permission": {
+        "edit": "deny",
+        "bash": "deny",
+        "webfetch": "deny"
+      },
+      "prompt": "You draft self-contained artifacts: one complete file, plan or document per request, in a single fenced block. You are reliably good at writing new code from a clear spec, and unreliable at quoting existing code verbatim \u2014 so never reproduce an existing file you were not given in full, and say what you assumed instead of guessing."
     }
   },
-
   "permission": {
     "edit": "allow",
-    "bash": "ask",
+    "bash": {
+      "*": "ask",
+      "git status*": "allow",
+      "git diff*": "allow",
+      "git log*": "allow",
+      "git show*": "allow",
+      "git ls-files*": "allow",
+      "grep*": "allow",
+      "rg*": "allow",
+      "ls*": "allow",
+      "dir*": "allow",
+      "findstr*": "allow",
+      "where*": "allow"
+    },
     "webfetch": "allow"
   }
 }
