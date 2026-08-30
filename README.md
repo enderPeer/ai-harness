@@ -82,20 +82,28 @@ opencode run --command ultra "port the queue to SSE"
 Subagents are reached through the task tool (`--agent` only selects primary
 agents).
 
-Editing is allowed. `bash` is an allowlist: read-only inspection (`git status`,
-`git diff`, `grep`, `rg`, `ls`, `findstr`) runs unattended, everything else
-asks. That split exists because a headless `opencode run` has nobody to ask, so
-a plain `"ask"` silently auto-rejects — which killed the verification pass of
-`/ultra` until the allowlist went in.
+This agent runs **unattended**: `edit`, `bash`, `webfetch` and
+`external_directory` are all `allow`, so `/ultra` completes its verification
+pass and can work on the deployed copies under `C:\llama.cpp` and `C:\hy3d`
+without stopping. That is a deliberate choice, not a default — a 30B model has
+a shell on this machine and the file tools reach anywhere the account does.
+Tighten `permission` in `agent/opencode.json` if you want it back on a leash.
 
-Two things about that allowlist, both learned the hard way. **Order matters and
-it is the reverse of what you expect**: the last matching rule wins, so the
-catch-all `"*": "ask"` must come *first* and the specific allows after it —
-written the other way round, the catch-all overrides every allow and nothing
-runs, while `opencode debug agent build` cheerfully lists all your rules as
-registered. And the patterns match the command string, so they stop accidents,
-not a determined shell chain; set `permission.bash` to `"allow"` only if you
-want it truly unattended.
+Two things learned while getting there, both of which look like the tool being
+broken when they are not:
+
+- **A headless `opencode run` has nobody to ask**, so a permission set to
+  `"ask"` is an auto-*reject*. `/ultra` delegated to scout correctly and then
+  died on its own verification pass because of it.
+- **The last matching rule wins, so pattern order is the reverse of the
+  intuition.** A catch-all `"*": "ask"` written at the end of an allowlist
+  overrides every allow above it, and `opencode debug agent build` still lists
+  all the rules as registered — it looks configured and denies everything. Put
+  the catch-all first, the specific rules after.
+
+Note also that gating `external_directory` while `bash` is open buys nothing:
+the agent reads outside the project with `type` or `cat` regardless. The file
+tools were the only thing being stopped.
 
 ## Components
 
