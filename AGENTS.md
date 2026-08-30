@@ -43,6 +43,10 @@ it by default (`no_think`), and `glm.ps1` has `-NoThink`.
 - `gen3d_generate` / `gen3d_job` / `gen3d_gallery` — concept art → GLB mesh.
   One image, or four views (front/back/left/right) for the multi-view model.
 - `comfy_status` — ComfyUI queue and 4090 VRAM before you queue image work.
+- `comfy_outputs` / `comfy_fetch` — what the 4090 has drawn, and pulling it
+  down. `comfy_fetch` takes a `set` prefix and returns the four views in
+  front/back/left/right order, ready for `gen3d_generate`. There is no API key
+  and no gallery login involved — ComfyUI is ours, over the tunnel.
 - `remote_run` — a shell on `adler` or `specht` as user `end`.
 
 ## Things that will bite you

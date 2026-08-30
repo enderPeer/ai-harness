@@ -62,9 +62,10 @@ division of labour:
 
 `mcp/cluster_mcp.py` is a dependency-free MCP server that hands the agent the
 rest of the cluster: `cluster_status`, `worker_ask` (delegate to a free worker),
-`gen3d_generate` / `gen3d_job` / `gen3d_gallery`, `comfy_status`, and
-`remote_run` (a shell on either server). So the agent can generate a mesh, queue
-art on the 4090, or read a GPU on specht without leaving the session.
+`gen3d_generate` / `gen3d_job` / `gen3d_gallery`, `comfy_status` /
+`comfy_outputs` / `comfy_fetch`, and `remote_run` (a shell on either server).
+So the agent can list the art the 4090 has made, pull a four-view set down, mesh
+it, and check a GPU on specht without leaving the session.
 
 Two commands encode the way this cluster is meant to be worked:
 
@@ -115,6 +116,10 @@ tools were the only thing being stopped.
   JS): active workers with streaming thought view, token totals by label,
   expandable call history, GPU stats, and the orchestrator's own token usage
   parsed from session transcripts.
+- `gen3d/asset-pipeline.ps1` — art → game-ready GLB in one call: pulls the
+  views from our own ComfyUI, meshes them, polishes in Blender. `-List` shows
+  what ComfyUI has made. No credentials: it is our instance on adler, reached
+  through the tunnel, so `/view` serves the outputs directly.
 - `gen3d/` — image→3D: pauses the local LLM worker to free VRAM, runs
   Hunyuan3D-2 shape generation, exports GLB, restarts the worker.
   `gen3d-ui.py` is the browser front end for it (queue, live pipeline log,

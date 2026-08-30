@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -179,6 +180,86 @@ def t_comfy_status(_args: dict) -> str:
     return "\n".join(out)
 
 
+def comfy_output_names() -> list[str]:
+    """ComfyUI output filenames, newest first. /history is oldest-first."""
+    hist = http(f"{COMFY}/history", timeout=25)
+    names: list[str] = []
+    for record in hist.values():
+        for node in (record.get("outputs") or {}).values():
+            for img in node.get("images", []):
+                if img.get("type") == "output" and img["filename"] not in names:
+                    names.append(img["filename"])
+    names.reverse()
+    return names
+
+
+def t_comfy_outputs(args: dict) -> str:
+    try:
+        names = comfy_output_names()
+    except Exception as exc:  # noqa: BLE001
+        return f"ComfyUI unreachable at {COMFY}: {exc}"
+    if not names:
+        return "ComfyUI has produced nothing yet"
+    limit = int(args.get("limit", 30))
+    # Group the front/back/left/right sets: a complete one feeds the multi-view
+    # 3D model directly, which is the whole point of listing them.
+    sets: dict[str, set[str]] = {}
+    for n in names:
+        m = re.match(r"(.+?)-(front|back|left|right)(_\d+_)?\.\w+$", n, re.I)
+        if m:
+            sets.setdefault(m.group(1), set()).add(m.group(2).lower())
+    out = [f"{len(names)} outputs on adler ({COMFY})", "", "most recent:"]
+    out += [f"  {n}" for n in names[:limit]]
+    complete = sorted(k for k, v in sets.items() if len(v) == 4)
+    if complete:
+        out += ["", f"complete 4-view sets ({len(complete)}) — pass one to gen3d_generate:"]
+        out += [f"  {k}" for k in complete]
+    partial = sorted((k, sorted(v)) for k, v in sets.items() if len(v) < 4)
+    if partial:
+        out += ["", f"incomplete sets ({len(partial)}):"]
+        out += [f"  {k}: {', '.join(v)}" for k, v in partial[:20]]
+    return "\n".join(out)
+
+
+def t_comfy_fetch(args: dict) -> str:
+    """Pull outputs off adler to local disk. No credentials: it is our ComfyUI,
+    reached over the tunnel, so /view serves them directly."""
+    out_dir = Path(args.get("out_dir") or (Path.home() / "Downloads" / "comfy"))
+    names = args.get("files") or []
+    prefix = args.get("set")
+    if prefix:
+        try:
+            available = comfy_output_names()
+        except Exception as exc:  # noqa: BLE001
+            return f"ComfyUI unreachable at {COMFY}: {exc}"
+        order = {"front": 0, "back": 1, "left": 2, "right": 3}
+        matched = [n for n in available if n.startswith(prefix + "-")]
+
+        def view_rank(name: str) -> int:
+            for view, rank in order.items():
+                if f"-{view}_" in name or name.endswith(f"-{view}.png"):
+                    return rank
+            return 9
+
+        names = sorted(matched, key=view_rank)
+    if not names:
+        return "error: give `files` (output filenames) or `set` (a name prefix like vet3-plate-carrier)"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    saved = []
+    for name in names:
+        query = urllib.parse.urlencode({"filename": name, "type": "output", "subfolder": ""})
+        try:
+            with urllib.request.urlopen(f"{COMFY}/view?{query}", timeout=120) as r:
+                data = r.read()
+        except Exception as exc:  # noqa: BLE001
+            return f"error fetching {name}: {exc}"
+        dst = out_dir / name
+        dst.write_bytes(data)
+        saved.append(f"  {dst}  ({len(data) / 1e6:.1f} MB)")
+    return (f"fetched {len(saved)} file(s) from adler:\n" + "\n".join(saved) +
+            "\n\nPass these paths to gen3d_generate (in front, back, left, right order) to mesh them.")
+
+
 def t_remote_run(args: dict) -> str:
     host, command = args.get("host", ""), args.get("command", "")
     if not command:
@@ -265,6 +346,25 @@ TOOLS = [
         "description": "ComfyUI queue depth and 4090 VRAM on adler — check before queueing image generation.",
         "inputSchema": {"type": "object", "properties": {}},
         "fn": t_comfy_status,
+    },
+    {
+        "name": "comfy_outputs",
+        "description": "List the art ComfyUI has generated on adler, newest first, and group the front/back/left/right sets. A complete 4-view set can go straight into gen3d_generate for a much better mesh.",
+        "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer", "description": "How many recent filenames to show (default 30)."}}},
+        "fn": t_comfy_outputs,
+    },
+    {
+        "name": "comfy_fetch",
+        "description": "Download ComfyUI outputs from adler to local disk. No credentials needed — it is our own instance over the tunnel. Give `set` (a name prefix like 'vet3-plate-carrier') to pull a whole view set in front/back/left/right order, or `files` for exact filenames.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "set": {"type": "string", "description": "Name prefix; pulls every view of that set, correctly ordered."},
+                "files": {"type": "array", "items": {"type": "string"}, "description": "Exact output filenames."},
+                "out_dir": {"type": "string", "description": "Where to save (default ~/Downloads/comfy)."},
+            },
+        },
+        "fn": t_comfy_fetch,
     },
     {
         "name": "remote_run",
