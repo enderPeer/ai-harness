@@ -42,7 +42,38 @@ pwsh -File scripts\start-cluster.ps1        # starts what is missing, prints the
 | GLM-4.7-Flash chat (llama.cpp web UI) | <http://127.0.0.1:8080/> | local RTX 4080 |
 | GLM-4.7-Flash 131k chat (llama.cpp web UI) | <http://127.0.0.1:9088/> | specht, 2× AMD |
 | ComfyUI — image generation | <http://127.0.0.1:9188/> | adler, RTX 4090 |
+| opencode — coding agent driving all of the above | <http://127.0.0.1:8096/> | agent, all tiers |
 
+
+## The agent layer
+
+[opencode](https://opencode.ai) is wired to the cluster's own models — no
+hosted API, no key, no per-token cost. `agent/opencode.json` (deployed to
+`~/.config/opencode/opencode.json`) declares both llama.cpp servers as
+OpenAI-compatible providers and adds three subagents that match the measured
+division of labour:
+
+| Agent | Model | Job |
+|---|---|---|
+| `build` (default) | specht 131k | drives the work, makes the byte-exact edits |
+| `scout` | local 4080 | fast search; reports `file:line`, cannot edit |
+| `auditor` | specht 131k | reads whole files end to end, cannot edit |
+| `drafter` | local 4080 | self-contained new modules and plans, cannot edit |
+
+`mcp/cluster_mcp.py` is a dependency-free MCP server that hands the agent the
+rest of the cluster: `cluster_status`, `worker_ask` (delegate to a free worker),
+`gen3d_generate` / `gen3d_job` / `gen3d_gallery`, `comfy_status`, and
+`remote_run` (a shell on either server). So the agent can generate a mesh, queue
+art on the 4090, or read a GPU on specht without leaving the session.
+
+```bash
+opencode                                   # TUI in the current repo
+opencode run "summarise the transport fix"  # headless
+```
+
+Subagents are reached through the task tool (`--agent` only selects primary
+agents). Editing is allowed, `bash` asks first — loosen it in the config if you
+want it fully autonomous.
 
 ## Components
 
@@ -63,6 +94,11 @@ pwsh -File scripts\start-cluster.ps1        # starts what is missing, prints the
   out-of-memory error, not a speedup.
 - `net/wgexpose.py` — the user-context relay that puts a remote loopback
   service on the WireGuard address for one allowlisted peer.
+- `mcp/cluster_mcp.py` — MCP server exposing the cluster (status, workers,
+  3D pipeline, ComfyUI, remote shell) to any MCP-speaking agent. Stdlib only.
+- `agent/opencode.json` — the opencode configuration: both local providers,
+  the subagents, and the MCP wiring. `AGENTS.md` is the project brief the
+  agent reads on entry.
 - `scripts/start-cluster.ps1` — idempotent bring-up of tunnels, relays and
   local servers; prints every UI link with a live up/down check.
 - `scripts/worker-queue.ps1` — idle production: queues drafting tasks

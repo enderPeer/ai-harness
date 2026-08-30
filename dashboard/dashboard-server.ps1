@@ -69,7 +69,8 @@ while ($true) {
                     @{ name = 'gen3d studio'; where = 'local RTX 4080'; url = 'http://127.0.0.1:8095/'; probe = 'http://127.0.0.1:8095/api/state'; what = 'image -> GLB (Hunyuan3D)'; up = $false; at = [datetime]::MinValue },
                     @{ name = 'GLM-4.7-Flash'; where = 'local RTX 4080'; url = 'http://127.0.0.1:8080/'; probe = 'http://127.0.0.1:8080/health'; what = 'chat / 32k ctx'; up = $false; at = [datetime]::MinValue },
                     @{ name = 'GLM-4.7-Flash 131k'; where = 'specht 2x AMD'; url = 'http://127.0.0.1:9088/'; probe = 'http://127.0.0.1:9088/health'; what = 'chat / whole-codebase ctx'; up = $false; at = [datetime]::MinValue },
-                    @{ name = 'ComfyUI'; where = 'adler RTX 4090'; url = 'http://127.0.0.1:9188/'; probe = 'http://127.0.0.1:9188/system_stats'; what = 'image generation'; up = $false; at = [datetime]::MinValue }
+                    @{ name = 'ComfyUI'; where = 'adler RTX 4090'; url = 'http://127.0.0.1:9188/'; probe = 'http://127.0.0.1:9188/system_stats'; what = 'image generation'; up = $false; at = [datetime]::MinValue },
+                    @{ name = 'opencode'; where = 'agent, all tiers'; url = 'http://127.0.0.1:8096/'; probe = 'http://127.0.0.1:8096/config'; what = 'coding agent on the free workers'; up = $false; at = [datetime]::MinValue }
                 )
             }
             # One probe per request, oldest first: this listener serves requests
