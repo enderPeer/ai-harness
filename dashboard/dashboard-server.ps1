@@ -42,23 +42,18 @@ while ($true) {
             $resp = ConvertTo-Json -InputObject @($recs) -Depth 20 -Compress
         }
         elseif ($path -eq "/api/slots") {
-            # local worker live; remote workers polled via ssh (sshd -L is SELinux-blocked), cached 20s
-            if (-not $script:slotCacheAt -or ((Get-Date) - $script:slotCacheAt).TotalSeconds -gt 20) {
+            # Every worker is a plain HTTP call now: the wireproxy TCPClientTunnels
+            # (9088 specht, 9188 adler) replaced the old ssh+curl hop, so remote
+            # workers poll as fast as the local one. 5s cache is plenty.
+            if (-not $script:slotCacheAt -or ((Get-Date) - $script:slotCacheAt).TotalSeconds -gt 5) {
                 $all = @()
-                try {
-                    $s = Invoke-RestMethod -Uri 'http://127.0.0.1:8080/slots' -TimeoutSec 3
-                    foreach ($slot in @($s)) { $slot | Add-Member -NotePropertyName worker -NotePropertyValue 'local-4080' -Force; $all += $slot }
-                } catch {}
-                $remotes = @(
-                    @{ name = 'specht-9070xt'; sock = '1081'; ip = '10.72.0.1'; port = 8086 },
-                    @{ name = 'specht-9060xt'; sock = '1081'; ip = '10.72.0.1'; port = 8087 },
-                    @{ name = 'specht-bigctx-128k'; sock = '1081'; ip = '10.72.0.1'; port = 8088 }
-                    # adler-4090 (sock 1080, 10.71.0.1:8085) deferred — VRAM held by picture-AI; re-add when free
+                $workers = @(
+                    @{ name = 'local-4080'; url = 'http://127.0.0.1:8080' },
+                    @{ name = 'specht-bigctx-131k'; url = 'http://127.0.0.1:9088' }
                 )
-                foreach ($w in $remotes) {
+                foreach ($w in $workers) {
                     try {
-                        $raw = ssh -o "ProxyCommand=`"C:\Program Files\Git\mingw64\bin\connect.exe`" -S 127.0.0.1:$($w.sock) %h %p" -o BatchMode=yes -o ConnectTimeout=8 -i "$env:USERPROFILE\.ssh\id_ed25519" "end@$($w.ip)" "curl -s --max-time 4 http://127.0.0.1:$($w.port)/slots" 2>$null | Out-String
-                        $s = $raw | ConvertFrom-Json
+                        $s = Invoke-RestMethod -Uri "$($w.url)/slots" -TimeoutSec 4
                         foreach ($slot in @($s)) { $slot | Add-Member -NotePropertyName worker -NotePropertyValue $w.name -Force; $all += $slot }
                     } catch {}
                 }
@@ -66,6 +61,27 @@ while ($true) {
                 $script:slotCacheAt = Get-Date
             }
             $resp = $script:slotCache
+        }
+        elseif ($path -eq "/api/interfaces") {
+            # Live index of every UI in the cluster - what the links panel renders.
+            if (-not $script:ifState) {
+                $script:ifState = @(
+                    @{ name = 'gen3d studio'; where = 'local RTX 4080'; url = 'http://127.0.0.1:8095/'; probe = 'http://127.0.0.1:8095/api/state'; what = 'image -> GLB (Hunyuan3D)'; up = $false; at = [datetime]::MinValue },
+                    @{ name = 'GLM-4.7-Flash'; where = 'local RTX 4080'; url = 'http://127.0.0.1:8080/'; probe = 'http://127.0.0.1:8080/health'; what = 'chat / 32k ctx'; up = $false; at = [datetime]::MinValue },
+                    @{ name = 'GLM-4.7-Flash 131k'; where = 'specht 2x AMD'; url = 'http://127.0.0.1:9088/'; probe = 'http://127.0.0.1:9088/health'; what = 'chat / whole-codebase ctx'; up = $false; at = [datetime]::MinValue },
+                    @{ name = 'ComfyUI'; where = 'adler RTX 4090'; url = 'http://127.0.0.1:9188/'; probe = 'http://127.0.0.1:9188/system_stats'; what = 'image generation'; up = $false; at = [datetime]::MinValue }
+                )
+            }
+            # One probe per request, oldest first: this listener serves requests
+            # one at a time, so probing all four inline would stall every other
+            # panel on the page for as long as the slowest endpoint takes.
+            $stale = $script:ifState | Sort-Object { $_.at } | Select-Object -First 1
+            try { $null = Invoke-RestMethod -Uri $stale.probe -TimeoutSec 3; $stale.up = $true } catch { $stale.up = $false }
+            $stale.at = Get-Date
+            $view = foreach ($i in $script:ifState) {
+                [PSCustomObject]@{ name = $i.name; where = $i.where; url = $i.url; what = $i.what; up = $i.up; checked = if ($i.at -eq [datetime]::MinValue) { $null } else { $i.at.ToString('o') } }
+            }
+            $resp = ConvertTo-Json -InputObject @($view) -Depth 5 -Compress
         }
         elseif ($path -eq "/api/fable") {
             # Fable/Claude session usage: sum token usage across this project's transcripts, cached 60s

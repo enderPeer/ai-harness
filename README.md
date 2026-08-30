@@ -25,6 +25,25 @@ The insight behind the deep tier: the model file (~14 GB) splits across two
 KV cache — a 131,072-token context at GPU speed, from cards that individually
 max out around 16k.
 
+## User interfaces
+
+Everything is a localhost link. The two remote UIs ride the WireGuard tunnels
+(see *Transport* below), so the browser needs no proxy settings — start the
+cluster and open them:
+
+```powershell
+pwsh -File scripts\start-cluster.ps1        # starts what is missing, prints the links
+```
+
+| Interface | URL | Runs on |
+|---|---|---|
+| Dashboard — workers, tokens, live index of these links | <http://127.0.0.1:8090/> | local |
+| gen3d studio — image → GLB, preview, gallery | <http://127.0.0.1:8095/> | local RTX 4080 |
+| GLM-4.7-Flash chat (llama.cpp web UI) | <http://127.0.0.1:8080/> | local RTX 4080 |
+| GLM-4.7-Flash 131k chat (llama.cpp web UI) | <http://127.0.0.1:9088/> | specht, 2× AMD |
+| ComfyUI — image generation | <http://127.0.0.1:9188/> | adler, RTX 4090 |
+
+
 ## Components
 
 - `worker/glm.ps1` — the worker client. Streams responses (SSE), logs every
@@ -37,6 +56,15 @@ max out around 16k.
   parsed from session transcripts.
 - `gen3d/` — image→3D: pauses the local LLM worker to free VRAM, runs
   Hunyuan3D-2 shape generation, exports GLB, restarts the worker.
+  `gen3d-ui.py` is the browser front end for it (queue, live pipeline log,
+  in-page 3D preview, gallery): drop one concept image, or drop the
+  front/back/left/right set and it switches to the multi-view model
+  automatically. One job at a time — two shape models on one card is an
+  out-of-memory error, not a speedup.
+- `net/wgexpose.py` — the user-context relay that puts a remote loopback
+  service on the WireGuard address for one allowlisted peer.
+- `scripts/start-cluster.ps1` — idempotent bring-up of tunnels, relays and
+  local servers; prints every UI link with a live up/down check.
 - `scripts/worker-queue.ps1` — idle production: queues drafting tasks
   (code modules, level layouts, shader upgrades, code reviews) across workers,
   outputs to a review folder — nothing enters a repo unreviewed.
@@ -46,13 +74,35 @@ max out around 16k.
   scripts with byte-exact verification (and taught us that models can't quote
   verbatim — see lessons).
 
-## Transport (the interesting failure)
+## Transport (the interesting failure, now solved)
 
-Remote workers sit behind WireGuard tunnels (userspace `wireproxy` → SOCKS →
-ssh). On the SELinux-confined hosts, `ssh -L` port forwarding is denied for
-sshd while *user-context* processes connect freely — so the harness POSTs
-via `ssh host "curl -d @- ..."` instead: the request runs server-side in
-user context. Streaming is lost for remote workers; logging is not.
+Remote workers sit behind WireGuard tunnels (userspace `wireproxy`). `ssh -L`
+into them fails — and the reason took a while to pin down, because it is not
+where it looks. The forward is set up fine; the *server side* refuses:
+
+```
+debug1: Connection to port 19089 forwarding to 127.0.0.1 port 8088 requested.
+channel 1: open failed: connect failed: open failed
+```
+
+sshd's own SELinux domain may not connect to a staff user's ports, and the
+denial is `dontaudit`-suppressed — which is why the admins, checking the audit
+log and the sshd config, correctly reported no policy and no denials. The
+harness used to route around it by POSTing through `ssh host "curl -d @- ..."`,
+which runs in *user* context and works — at the cost of streaming.
+
+The current fix keeps everything in user context but restores streaming:
+
+1. `net/wgexpose.py` runs as the user on the server and relays its own
+   `10.7x.0.1:1xxxx` → `127.0.0.1:<service>`, refusing every peer except the
+   workstation's tunnel address.
+2. `wireproxy`'s `[TCPClientTunnel]` maps that to a local port, so
+   `http://127.0.0.1:9088/` *is* specht's llama.cpp and `:9188` *is* adler's
+   ComfyUI — in the browser, with SSE token streaming and ComfyUI's websockets
+   intact, and no proxy configuration anywhere.
+
+The dashboard's slot polling dropped its 20-second ssh-and-cache hop for a
+plain HTTP call as a result.
 
 ## Lessons learned (measured, not vibes)
 
@@ -70,6 +120,15 @@ user context. Streaming is lost for remote workers; logging is not.
    is a scheduling bug.
 4. **PowerShell pipelines mangle arrays.** `ConvertTo-Json` after a pipe
    double- or zero-wraps arrays; always `ConvertTo-Json -InputObject @($x)`.
+5. **"No denials in the audit log" is not "no denial."** SELinux `dontaudit`
+   rules suppress exactly the entry you are looking for, so a policy check can
+   come back clean while the operation keeps failing. The client-side
+   `ssh -vv` channel error located it in one run; two days of asking the wrong
+   side did not.
+6. **A single-threaded listener must never probe the network inline.** The
+   dashboard's link panel checked four endpoints per request and stalled every
+   other panel on the page; probing one endpoint per request, oldest first,
+   made it free.
 
 ## What got produced with it (so far)
 

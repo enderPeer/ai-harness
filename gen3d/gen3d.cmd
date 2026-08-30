@@ -12,5 +12,6 @@ C:\hy3d\venv\Scripts\python.exe C:\hy3d\gen3d.py %1 %2 %3
 set RC=%ERRORLEVEL%
 
 echo [gen3d] restarting local GLM worker...
-start "glm-server" /min C:\llama.cpp\start-glm-server.cmd
+REM Start-Process detaches fully; a bare `start` kept the caller's pipe open.
+powershell -NoProfile -Command "Start-Process -WindowStyle Hidden cmd -ArgumentList '/c','C:\llama.cpp\start-glm-server.cmd'"
 exit /b %RC%

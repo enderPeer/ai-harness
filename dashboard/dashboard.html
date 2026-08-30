@@ -98,6 +98,17 @@ details[open] summary { margin-bottom: 8px; }
 .code-block.error { color: var(--error); }
 .code-block.system { color: var(--accent); }
 .no-data { color: #555; font-style: italic; font-size: 13px; }
+.iface-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.iface {
+  display: block; text-decoration: none; color: var(--text); background: rgba(0,0,0,.15);
+  border: 1px solid #253040; border-radius: 4px; padding: 10px 12px;
+}
+.iface:hover { border-color: var(--accent); background: rgba(79,163,255,.08); }
+.iface .n { font-weight: 600; display: flex; align-items: center; gap: 7px; }
+.iface .w { font-size: 12px; color: #888; margin-top: 3px; }
+.iface .u { font-size: 11px; color: var(--accent); font-family: 'Courier New', monospace; margin-top: 5px; }
+.iface.down { opacity: .55; }
+.iface.down .u { color: #7d8894; }
 </style>
 </head>
 <body>
@@ -113,6 +124,12 @@ details[open] summary { margin-bottom: 8px; }
 </header>
 
 <main>
+  <section>
+    <div class="section-title">Interfaces</div>
+    <div class="iface-grid" id="interfaces"><div class="no-data">checking…</div></div>
+    <div style="height:15px"></div>
+  </section>
+
   <section>
     <div class="section-title">Active Workers</div>
     <div class="active-grid" id="active-workers">
@@ -460,6 +477,18 @@ function updateUI() {
   renderHistory();
 }
 
+async function fetchInterfaces() {
+  try {
+    const list = await (await fetch(`${API}/interfaces`)).json();
+    document.getElementById('interfaces').innerHTML = list.map(i => `
+      <a class="iface ${i.up || !i.checked ? '' : 'down'}" href="${i.url}" target="_blank">
+        <div class="n"><span class="status-dot ${i.up ? 'online' : ''}"></span>${i.name}</div>
+        <div class="w">${i.where} — ${i.what}</div>
+        <div class="u">${i.url}</div>
+      </a>`).join('');
+  } catch (e) { /* server restarting; the next tick repaints */ }
+}
+
 async function fetchFable() {
   try {
     const f = await (await fetch(`${API}/fable`)).json();
@@ -475,6 +504,8 @@ async function fetchFable() {
 setInterval(async () => { await fetchData(); updateUI(); }, 2000);
 setInterval(fetchGpu, 5000);
 setInterval(fetchFable, 30000);
+fetchInterfaces();
+setInterval(fetchInterfaces, 3000);
 fetchFable();
 
 // Initial run

@@ -15,10 +15,13 @@ def main() -> int:
         print(__doc__)
         return 2
     target = int(sys.argv[1])
-    for arg in sys.argv[2:]:
+    # Flags may be interleaved with paths (gen3d_mv.py passes --no-backup last);
+    # treating one as a filename made pymeshlab throw and skipped decimation.
+    no_backup = "--no-backup" in sys.argv
+    for arg in [a for a in sys.argv[2:] if not a.startswith("--")]:
         p = Path(arg)
         backup = p.with_suffix(".orig.glb")
-        if "--no-backup" not in sys.argv and not backup.exists():
+        if not no_backup and not backup.exists():
             shutil.copy2(p, backup)
         ms = pymeshlab.MeshSet()
         ms.load_new_mesh(str(p))

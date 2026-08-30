@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>gen3d studio</title>
+<style>
+:root {
+  --bg: #101418; --panel: #1a2028; --text: #d8dee6; --accent: #4fa3ff;
+  --ok: #3fb96d; --error: #e05555; --thinking: #d9a53f; --code-bg: #0f1217; --line: #253040;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--text); margin: 0; padding: 10px; font-size: 14px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+header {
+  background: var(--panel); padding: 15px 20px; border-radius: 6px; display: flex;
+  justify-content: space-between; align-items: center; margin-bottom: 15px; box-shadow: 0 2px 8px rgba(0,0,0,.3);
+}
+h1 { margin: 0; font-size: 18px; font-weight: 600; }
+.sub-header { font-size: 12px; color: #888; margin-top: 4px; }
+.status-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--error); margin-right: 8px; display: inline-block; }
+.status-dot.online { background: var(--ok); }
+.section-title { font-size: 15px; font-weight: 600; margin-bottom: 10px; border-left: 3px solid var(--accent); padding-left: 10px; }
+.card { background: var(--panel); padding: 12px; border-radius: 4px; margin-bottom: 15px; border: 1px solid var(--line); }
+.cols { display: grid; grid-template-columns: minmax(320px, 420px) 1fr; gap: 15px; align-items: start; }
+@media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+
+#drop {
+  border: 2px dashed #37455c; border-radius: 6px; padding: 26px 14px; text-align: center; cursor: pointer;
+  color: #8b97a8; transition: .15s; background: rgba(79,163,255,.03);
+}
+#drop:hover, #drop.over { border-color: var(--accent); color: var(--text); background: rgba(79,163,255,.09); }
+#drop img { max-width: 100%; max-height: 220px; border-radius: 4px; display: block; margin: 0 auto 8px; }
+label { display: block; font-size: 12px; color: #888; margin: 12px 0 4px; }
+select, input[type=number] {
+  width: 100%; background: var(--code-bg); color: var(--text); border: 1px solid var(--line);
+  border-radius: 3px; padding: 7px 8px; font-size: 13px; font-family: inherit;
+}
+button {
+  background: var(--accent); color: #06101c; border: 0; border-radius: 4px; padding: 10px 14px;
+  font-size: 14px; font-weight: 600; cursor: pointer; width: 100%; margin-top: 14px;
+}
+button:disabled { background: #33414f; color: #7d8894; cursor: not-allowed; }
+button.ghost { background: transparent; border: 1px solid var(--line); color: #9aa6b4; width: auto;
+  padding: 4px 10px; font-size: 12px; font-weight: 400; margin: 0; }
+
+.job { border: 1px solid var(--line); border-radius: 4px; padding: 10px; margin-bottom: 10px; background: rgba(0,0,0,.15); }
+.job-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.job-name { font-weight: 600; }
+.badge { font-size: 11px; padding: 2px 7px; border-radius: 3px; background: #333; color: #ccc; text-transform: uppercase; }
+.badge.running { background: var(--thinking); color: #000; }
+.badge.done { background: var(--ok); color: #04140a; }
+.badge.error { background: var(--error); color: #fff; }
+.badge.queued { background: #555; }
+.badge.cancelled { background: #444; color: #999; }
+.meta { font-size: 12px; color: #888; margin-top: 4px; }
+.console-box {
+  background: var(--code-bg); border: 1px solid var(--line); border-radius: 3px; font-family: 'Courier New', monospace;
+  font-size: 12px; line-height: 1.4; max-height: 170px; overflow-y: auto; padding: 8px; margin-top: 8px; white-space: pre-wrap;
+}
+.bar-container { width: 100%; height: 8px; background: #333; border-radius: 4px; margin-top: 10px; overflow: hidden; }
+.bar-fill { height: 100%; background: var(--accent); width: 100%; animation: pulse 1.6s ease-in-out infinite; }
+@keyframes pulse { 0%,100% { opacity: .35 } 50% { opacity: 1 } }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.tile { border: 1px solid var(--line); border-radius: 4px; padding: 8px; cursor: pointer; background: rgba(0,0,0,.15); }
+.tile:hover { border-color: var(--accent); }
+.tile.active { border-color: var(--accent); background: rgba(79,163,255,.1); }
+.tile .n { font-size: 12px; word-break: break-all; }
+.tile .s { font-size: 11px; color: #888; margin-top: 3px; }
+model-viewer { width: 100%; height: 420px; background: #0b0f14; border-radius: 4px; --poster-color: transparent; }
+#viewer-fallback { color: #8b97a8; font-size: 13px; padding: 20px; text-align: center; display: none; }
+.no-data { color: #555; font-style: italic; font-size: 13px; }
+.views { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+.view { width: 82px; }
+.view img { width: 82px; height: 82px; object-fit: cover; border-radius: 3px; border: 1px solid var(--line); display: block; }
+.view .v { font-size: 11px; color: #8b97a8; margin-top: 3px; text-transform: uppercase; }
+a { color: var(--accent); }
+.links { display: flex; gap: 8px; flex-wrap: wrap; font-size: 12px; }
+.links a { border: 1px solid var(--line); border-radius: 3px; padding: 3px 9px; text-decoration: none; }
+.links a:hover { border-color: var(--accent); }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>gen3d studio</h1>
+    <div class="sub-header">
+      <span class="status-dot" id="dot"></span><span id="hstatus">connecting…</span>
+    </div>
+  </div>
+  <div style="text-align:right">
+    <div id="gpu">GPU --</div>
+    <div class="sub-header" id="llama">llm worker --</div>
+  </div>
+</header>
+
+<div class="links card" style="margin-bottom:15px">
+  <span style="color:#888">cluster:</span>
+  <span class="links">
+    <a href="http://127.0.0.1:8090/" target="_blank">dashboard</a>
+    <a href="http://127.0.0.1:8080/" target="_blank">local GLM (4080)</a>
+    <a href="http://127.0.0.1:9088/" target="_blank">specht GLM 131k (2× AMD)</a>
+    <a href="http://127.0.0.1:9188/" target="_blank">adler ComfyUI (4090)</a>
+  </span>
+</div>
+
+<div class="cols">
+  <div>
+    <div class="section-title">New mesh</div>
+    <div class="card">
+      <div id="drop">
+        <div id="drop-body"><strong>Drop a concept image</strong>
+          <div class="sub-header">or click to choose — one view, or up to four (front / back / left / right)</div></div>
+      </div>
+      <input type="file" id="file" accept="image/*" multiple hidden>
+
+      <label for="model">Shape model</label>
+      <select id="model"></select>
+      <div class="sub-header" id="mv-note" style="display:none;margin-top:4px"></div>
+
+      <label for="faces">Target faces after decimation (0 = keep full resolution)</label>
+      <input type="number" id="faces" value="8000" min="0" step="1000">
+
+      <button id="go" disabled>Generate mesh</button>
+      <div class="sub-header" style="margin-top:8px">
+        Generation takes the whole card: the local LLM worker is stopped for the run and restarted when the queue drains.
+      </div>
+    </div>
+
+    <div class="section-title">Queue</div>
+    <div id="jobs"><div class="no-data">No jobs yet</div></div>
+  </div>
+
+  <div>
+    <div class="section-title">Preview</div>
+    <div class="card">
+      <div id="viewer-slot"><div class="no-data" style="padding:20px;text-align:center">Select a mesh below</div></div>
+      <div id="viewer-fallback">
+        3D preview needs the model-viewer script (loaded from the internet on first use).
+        The mesh itself is fine — use the download link.
+      </div>
+      <div id="viewer-actions" style="margin-top:8px"></div>
+    </div>
+
+    <div class="section-title">Gallery</div>
+    <div class="card"><div class="gallery" id="gallery"><div class="no-data">No meshes yet</div></div></div>
+  </div>
+</div>
+
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"
+        onerror="window.mvFailed = true"></script>
+<script>
+const $ = (id) => document.getElementById(id);
+let picked = [];        // [{file, view}] — one entry per view
+let selected = null;    // gallery file name
+let lastGallery = "";
+
+// ---- upload picker
+const drop = $("drop"), fileInput = $("file");
+drop.onclick = () => fileInput.click();
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); take(e.dataTransfer.files); };
+fileInput.onchange = () => take(fileInput.files);
+
+async function take(files) {
+  const list = [...files].filter((f) => f.type.startsWith("image/")).slice(0, 4);
+  if (!list.length) return;
+  // The concept sets are already named ...-front_/-back_/-left_/-right_; honour that
+  // when it is there, fall back to drop order otherwise.
+  const order = ["front", "back", "left", "right"];
+  const seen = new Set();
+  picked = [];
+  for (const f of list) {
+    const hit = order.find((v) => new RegExp(`[-_.]${v}[-_.0-9]*[.][a-z]+$`, "i").test(f.name) && !seen.has(v));
+    picked.push({ file: f, view: hit || null });
+    if (hit) seen.add(hit);
+  }
+  for (const p of picked) {                       // fill the gaps in canonical order
+    if (!p.view) { p.view = order.find((v) => !seen.has(v)); seen.add(p.view); }
+  }
+  picked.sort((a, b) => order.indexOf(a.view) - order.indexOf(b.view));
+
+  $("drop-body").innerHTML =
+    `<div class="views">${picked.map((p) => `
+       <div class="view"><img src="${URL.createObjectURL(p.file)}" alt=""><div class="v">${p.view}</div></div>`).join("")}</div>
+     <div class="sub-header" style="margin-top:6px">${picked.length} view${picked.length > 1 ? "s" : ""} — click to replace</div>`;
+
+  const mv = picked.length > 1;
+  $("model").disabled = mv;
+  $("mv-note").style.display = mv ? "block" : "none";
+  $("mv-note").textContent = mv
+    ? `${picked.length} views → Hunyuan3D-2mv (multi-view); it decimates to 30k faces itself.`
+    : "";
+  $("go").disabled = false;
+}
+
+$("go").onclick = async () => {
+  if (!picked.length) return;
+  $("go").disabled = true;
+  try {
+    const stored = [];
+    for (const p of picked) {
+      const r = await fetch("/api/upload?name=" + encodeURIComponent(p.file.name),
+                            { method: "POST", body: await p.file.arrayBuffer() });
+      if (!r.ok) throw new Error(await r.text());
+      stored.push((await r.json()).file);
+    }
+    const body = {
+      files: stored, model: $("model").value, faces: Number($("faces").value),
+      stem: picked[0].file.name.replace(/[-_.](front|back|left|right)[-_.0-9]*\.[a-z]+$/i, ""),
+    };
+    const r = await fetch("/api/generate", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error((await r.json()).error || "queue failed");
+  } catch (e) {
+    alert("Could not queue the job: " + e.message);
+  }
+  $("go").disabled = false;
+  refresh();
+};
+
+// ---- state polling
+async function refresh() {
+  let s;
+  try { s = await (await fetch("/api/state")).json(); }
+  catch { $("dot").classList.remove("online"); $("hstatus").textContent = "server unreachable"; return; }
+
+  $("dot").classList.add("online");
+  $("hstatus").textContent = s.busy ? "generating…" : (s.queued ? `${s.queued} queued` : "idle");
+  $("gpu").textContent = s.gpu.name
+    ? `${s.gpu.name} — ${s.gpu.util}% · ${(s.gpu.used / 1024).toFixed(1)}/${(s.gpu.total / 1024).toFixed(1)} GB · ${s.gpu.temp}°C`
+    : "GPU --";
+  $("llama").textContent = s.llama ? "llm worker: up (8080)" : "llm worker: stopped";
+
+  const sel = $("model");
+  if (!sel.options.length) {
+    for (const [id, label] of Object.entries(s.models)) sel.add(new Option(label, id));
+  }
+
+  $("jobs").innerHTML = s.jobs.length ? s.jobs.map(jobCard).join("") : '<div class="no-data">No jobs yet</div>';
+
+  const key = JSON.stringify(s.gallery);
+  if (key !== lastGallery) {
+    lastGallery = key;
+    $("gallery").innerHTML = s.gallery.length ? s.gallery.map(g => `
+      <div class="tile ${g.name === selected ? "active" : ""}" onclick="show('${g.name.replace(/'/g, "\\'")}')">
+        <div class="n">${esc(g.name)}</div>
+        <div class="s">${g.mb} MB · ${g.at.replace("T", " ").slice(5, 16)}</div>
+      </div>`).join("") : '<div class="no-data">No meshes yet</div>';
+  }
+}
+
+function jobCard(j) {
+  const dur = j.seconds != null ? `${j.seconds}s` : "";
+  const line = [j.model.split("/").pop(), j.multiview ? `${j.views.length} views` : null,
+                j.multiview ? "30000 faces" : (j.faces ? `${j.faces} faces` : "full res"), dur].filter(Boolean).join(" · ");
+  return `<div class="job">
+    <div class="job-head">
+      <span class="job-name">${esc(j.stem)}</span>
+      <span class="badge ${j.status}">${j.step || j.status}</span>
+    </div>
+    <div class="meta">${esc(line)}</div>
+    ${j.status === "running" ? '<div class="bar-container"><div class="bar-fill"></div></div>' : ""}
+    ${j.error ? `<div class="console-box" style="color:var(--error)">${esc(j.error)}</div>` : ""}
+    ${j.tail.length && j.status !== "done" ? `<div class="console-box">${esc(j.tail.join("\n"))}</div>` : ""}
+    ${j.out ? `<div class="meta" style="margin-top:6px">→ <a href="#" onclick="show('${j.out.replace(/'/g, "\\'")}');return false">${esc(j.out)}</a></div>` : ""}
+  </div>`;
+}
+
+function show(name) {
+  selected = name;
+  lastGallery = "";  // force the gallery to re-render with the new highlight
+  const url = "/files/" + encodeURIComponent(name);
+  if (window.mvFailed || !customElements.get("model-viewer")) {
+    $("viewer-slot").innerHTML = "";
+    $("viewer-fallback").style.display = "block";
+  } else {
+    $("viewer-fallback").style.display = "none";
+    $("viewer-slot").innerHTML =
+      `<model-viewer src="${url}" camera-controls auto-rotate shadow-intensity="1" exposure="1.1"
+                     environment-image="neutral" alt="${esc(name)}"></model-viewer>`;
+  }
+  $("viewer-actions").innerHTML =
+    `<a href="${url}" download>download ${esc(name)}</a>
+     <span class="sub-header" style="margin-left:10px">drag into Blender / the ember asset folder</span>`;
+  refresh();
+}
+window.show = show;
+
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+refresh();
+setInterval(refresh, 1500);
+</script>
+</body>
+</html>
