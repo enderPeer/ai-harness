@@ -66,9 +66,17 @@ rest of the cluster: `cluster_status`, `worker_ask` (delegate to a free worker),
 `remote_run` (a shell on either server). So the agent can generate a mesh, queue
 art on the 4090, or read a GPU on specht without leaving the session.
 
+Two commands encode the way this cluster is meant to be worked:
+
+| Command | What it does |
+|---|---|
+| `/ultra <task>` | map with `scout`, fan out to `drafter` / `auditor` / `worker_ask`, verify every claim adversarially, then land the edits itself |
+| `/clusterreview [scope]` | review the diff with independent auditors and keep only findings that survive a refutation pass |
+
 ```bash
-opencode                                   # TUI in the current repo
+opencode                                    # TUI in the current repo
 opencode run "summarise the transport fix"  # headless
+opencode run --command ultra "port the queue to SSE"
 ```
 
 Subagents are reached through the task tool (`--agent` only selects primary
