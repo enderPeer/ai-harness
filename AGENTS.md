@@ -9,7 +9,8 @@ marginally shorter.
 
 | Tier | Where | Use it for |
 |---|---|---|
-| local RTX 4080 | this machine, `:8080` | fast drafting; also hosts the 3D pipeline |
+| local RTX 4080 | this machine, `:8080` | fast search and bulk reading; hosts the 3D pipeline |
+| barza, RTX PRO 4500 | off-site over TLS, Q5 quant | drafting where correctness beats speed (51/51 vs 47 and 45 on an executed benchmark) |
 | specht, 2× AMD | `:9088` via tunnel, 131k context | whole-file audits, long documents |
 | adler, RTX 4090 | `:9188` via tunnel | ComfyUI image generation |
 
@@ -38,8 +39,8 @@ it by default (`no_think`), and `glm.ps1` has `-NoThink`.
 
 - `cluster_status` — which tiers are up, local GPU state. Start here when
   something is unreachable.
-- `worker_ask` — delegate a self-contained task to a free worker (`specht` for
-  131k context, `local` for speed). Costs nothing.
+- `worker_ask` — delegate a self-contained task to a free worker: `specht` for
+  131k context, `local` for speed, `barza` for accuracy. Costs nothing.
 - `gen3d_generate` / `gen3d_job` / `gen3d_gallery` — concept art → GLB mesh.
   One image, or four views (front/back/left/right) for the multi-view model.
 - `comfy_status` — ComfyUI queue and 4090 VRAM before you queue image work.

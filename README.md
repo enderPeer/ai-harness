@@ -17,6 +17,7 @@ people.
 | Fast | RTX 4080 16GB (local) | GLM-4.7-Flash Q3, 1×32k ctx, ~136 tok/s | interactive drafting; hosts the 3D swap |
 | Deep | 2× AMD RX 9070XT/9060XT (remote) | one llama.cpp Vulkan server across **both** cards, **131k context** | whole-codebase audits, long documents |
 | Reserve | 64GB DDR5 / 45GB RAM boxes | RAM+CPU hybrid (gpt-oss-120b class), on demand | slow, smarter, 24/7-tolerant jobs |
+| Accurate | RTX PRO 4500 (off-site, barza) | Qwen3.8-27B **Q5_K_S**, 32k ctx, ~35 tok/s | drafting where correctness beats speed |
 | Art | RTX 4090 24GB (remote) | Ideogram 4 / Qwen Edit / Z-Image server | free textures, concepts, key art |
 | 3D | RTX 4080 (swapped) | Hunyuan3D-2 shape gen | concept image → GLB mesh |
 
@@ -58,7 +59,7 @@ division of labour:
 | `build` (default) | specht 131k | drives the work, makes the byte-exact edits |
 | `scout` | local 4080 | fast search; reports `file:line`, cannot edit |
 | `auditor` | specht 131k | reads whole files end to end, cannot edit |
-| `drafter` | local 4080 | self-contained new modules and plans, cannot edit |
+| `drafter` | barza Qwen3.8-27B | self-contained new modules and plans, cannot edit |
 
 `mcp/cluster_mcp.py` is a dependency-free MCP server that hands the agent the
 rest of the cluster: `cluster_status`, `worker_ask` (delegate to a free worker),
@@ -66,6 +67,42 @@ rest of the cluster: `cluster_status`, `worker_ask` (delegate to a free worker),
 `comfy_outputs` / `comfy_fetch`, and `remote_run` (a shell on either server).
 So the agent can list the art the 4090 has made, pull a four-view set down, mesh
 it, and check a GPU on specht without leaving the session.
+
+barza needs two things that deliberately live outside this repo, because one of
+them is a secret and the other is machine-local:
+
+| | |
+|---|---|
+| `~/.config/barza-llama.key` | the bearer token — referenced from the config as `{file:...}`, never inlined |
+| `~/.config/barza-llama.crt` | its self-signed CA; no public CA can issue for a bare IP |
+
+The certificate has to be pinned via `NODE_EXTRA_CA_CERTS` or the provider fails
+to connect with no useful error — `start-cluster.ps1` sets it, and it is a user
+environment variable so the TUI picks it up too. Verify a cert you were handed
+before trusting it: `openssl x509 -in barza-llama.crt -noout -fingerprint -sha256`
+should match the fingerprint in the endpoint's own documentation.
+
+### Which worker is actually best
+
+Measured, not assumed — three tasks with traps, three trials each, every answer
+**executed** against hidden cases rather than eyeballed:
+
+| Worker | Score | merge_intervals | roman | word wrap | Speed |
+|---|---|---|---|---|---|
+| barza Qwen3.8-27B Q5 | **51/51** | 15/15 | 21/21 | 15/15 | 35 tok/s |
+| local GLM-4.7-Flash Q3 | 47/51 | 12/15 | 21/21 | 14/15 | 100 tok/s |
+| specht GLM-4.7-Flash Q3 | 45/51 | 12/15 | 21/21 | 12/15 | 38 tok/s, erratic |
+
+The interesting part is *how* the GLMs fail: both missed the same
+`merge_intervals` case in every single trial — the one where `[1,2]` and `[3,4]`
+must merge because endpoints are inclusive. They drop that instruction detail
+and never recover it; barza never missed it. An easier benchmark
+(ISO-8601 durations) scored all three 16/16 and told us nothing, which is the
+lesson: a benchmark everything passes is not a measurement.
+
+So `drafter` runs on barza — self-contained artifacts are exactly what it wins
+at — while the primary agent stays on specht for the 131k context, and `scout`
+stays local because search wants speed, not depth.
 
 Two commands encode the way this cluster is meant to be worked:
 
@@ -131,7 +168,7 @@ tools were the only thing being stopped.
   service on the WireGuard address for one allowlisted peer.
 - `mcp/cluster_mcp.py` — MCP server exposing the cluster (status, workers,
   3D pipeline, ComfyUI, remote shell) to any MCP-speaking agent. Stdlib only.
-- `agent/opencode.json` — the opencode configuration: both local providers,
+- `agent/opencode.json` — the opencode configuration: all three providers,
   the subagents, and the MCP wiring. `AGENTS.md` is the project brief the
   agent reads on entry.
 - `scripts/start-cluster.ps1` — idempotent bring-up of tunnels, relays and

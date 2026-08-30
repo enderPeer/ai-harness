@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
 import time
@@ -35,7 +36,12 @@ COMFY = os.environ.get("COMFY_URL", "http://127.0.0.1:9188")
 WORKERS = {
     "local": os.environ.get("LOCAL_LLM_URL", "http://127.0.0.1:8080"),
     "specht": os.environ.get("SPECHT_LLM_URL", "http://127.0.0.1:9088"),
+    "barza": os.environ.get("BARZA_LLM_URL", "https://185.41.242.227:53018"),
 }
+# barza is off-site: TLS with a self-signed cert (no public CA can issue for a
+# bare IP) plus a bearer key. Both live in ~/.config, never in this repo.
+BARZA_CERT = os.environ.get("BARZA_CERT", str(Path.home() / ".config" / "barza-llama.crt"))
+BARZA_KEY_FILE = os.environ.get("BARZA_KEY_FILE", str(Path.home() / ".config" / "barza-llama.key"))
 CONNECT = os.environ.get("SSH_CONNECT", r"C:\Program Files\Git\mingw64\bin\connect.exe")
 SSH_KEY = os.environ.get("SSH_KEY", str(Path.home() / ".ssh" / "id_ed25519"))
 HOSTS = {  # name -> (socks port for its wireproxy, tunnel address)
@@ -46,11 +52,28 @@ HOSTS = {  # name -> (socks port for its wireproxy, tunnel address)
 
 # ----------------------------------------------------------------- http helpers
 
-def http(url: str, data: bytes | None = None, ctype: str = "application/json", timeout: int = 30):
+def barza_auth() -> dict[str, str]:
+    try:
+        return {"Authorization": "Bearer " + Path(BARZA_KEY_FILE).read_text(encoding="utf-8").strip()}
+    except OSError:
+        return {}
+
+
+def barza_ssl():
+    try:
+        return ssl.create_default_context(cafile=BARZA_CERT)
+    except OSError:
+        return None
+
+
+def http(url: str, data: bytes | None = None, ctype: str = "application/json", timeout: int = 30,
+         headers: dict[str, str] | None = None, context=None):
     req = urllib.request.Request(url, data=data, method="POST" if data is not None else "GET")
     if data is not None:
         req.add_header("Content-Type", ctype)
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    for key, value in (headers or {}).items():
+        req.add_header(key, value)
+    with urllib.request.urlopen(req, timeout=timeout, context=context) as r:
         body = r.read()
     try:
         return json.loads(body)
@@ -59,8 +82,11 @@ def http(url: str, data: bytes | None = None, ctype: str = "application/json", t
 
 
 def alive(url: str, timeout: int = 4) -> bool:
+    # barza's health check is open but still TLS: without its pinned CA the
+    # probe fails verification and the tier would be reported down.
+    ctx = barza_ssl() if url.startswith(WORKERS["barza"]) else None
     try:
-        http(url, timeout=timeout)
+        http(url, timeout=timeout, context=ctx)
         return True
     except Exception:
         return False
@@ -94,6 +120,7 @@ def t_cluster_status(_args: dict) -> str:
         ("gen3d studio", STUDIO, f"{STUDIO}/api/state"),
         ("llm local (RTX 4080, 32k)", WORKERS["local"], f"{WORKERS['local']}/health"),
         ("llm specht (2x AMD, 131k)", WORKERS["specht"], f"{WORKERS['specht']}/health"),
+        ("llm barza (Qwen3.8-27B Q5)", WORKERS["barza"], f"{WORKERS['barza']}/health"),
         ("ComfyUI (adler RTX 4090)", COMFY, f"{COMFY}/system_stats"),
     ]:
         lines.append(f"{'up  ' if alive(probe) else 'DOWN'} {name:28} {url}")
@@ -294,9 +321,11 @@ def t_worker_ask(args: dict) -> str:
         # "thinking" on mechanical work and return nothing.
         payload["chat_template_kwargs"] = {"enable_thinking": False}
     t0 = time.time()
+    extra = barza_auth() if worker == "barza" else None
+    ctx = barza_ssl() if worker == "barza" else None
     try:
         r = http(f"{WORKERS[worker]}/v1/chat/completions", data=json.dumps(payload).encode(),
-                 timeout=int(args.get("timeout", 600)))
+                 timeout=int(args.get("timeout", 600)), headers=extra, context=ctx)
     except Exception as exc:
         return f"error: {worker} worker failed: {exc}"
     if "choices" not in r:
@@ -382,12 +411,12 @@ TOOLS = [
     },
     {
         "name": "worker_ask",
-        "description": "Delegate a self-contained task to a free local LLM worker: 'specht' has 131k context (whole-file audits, long documents), 'local' is faster but 32k. Workers reliably produce self-contained artifacts — summaries, plans, single modules, reviews — and reliably fail at quoting existing code verbatim. Costs nothing, so prefer it over doing bulk reading yourself.",
+        "description": "Delegate a self-contained task to a free LLM worker: 'specht' has 131k context (whole-file audits, long documents), 'local' is fastest at ~100 tok/s and 32k, 'barza' is Qwen3.8-27B at Q5 (32k, ~35 tok/s) and scored 51/51 against the GLMs' 47 and 45 on an executed code benchmark — prefer it when correctness matters more than speed. Workers reliably produce self-contained artifacts — summaries, plans, single modules, reviews — and reliably fail at quoting existing code verbatim. Costs nothing, so prefer it over doing bulk reading yourself.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string"},
-                "worker": {"type": "string", "enum": ["specht", "local"], "description": "Default specht (131k context)."},
+                "worker": {"type": "string", "enum": ["specht", "local", "barza"], "description": "specht = 131k context for long documents; local = fastest; barza = most accurate on self-contained code. Default specht."},
                 "files": {"type": "array", "items": {"type": "string"}, "description": "Files to append to the prompt."},
                 "system": {"type": "string"},
                 "max_tokens": {"type": "integer"},

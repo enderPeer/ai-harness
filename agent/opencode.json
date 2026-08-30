@@ -34,6 +34,23 @@
           }
         }
       }
+    },
+    "barza": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Qwen3.8-27B \u2014 barza, RTX PRO 4500",
+      "options": {
+        "baseURL": "https://185.41.242.227:53018/v1",
+        "apiKey": "{file:C:/Users/end/.config/barza-llama.key}"
+      },
+      "models": {
+        "qwen3.8-27b": {
+          "name": "Qwen3.8-27B Q5_K_S (barza, 32k)",
+          "limit": {
+            "context": 32768,
+            "output": 8192
+          }
+        }
+      }
     }
   },
   "mcp": {
@@ -73,8 +90,8 @@
     },
     "drafter": {
       "mode": "subagent",
-      "description": "Drafts self-contained artifacts on the local 4080 \u2014 a new module, a config, a plan, a test file. Returns the artifact in its reply; it does not edit the repository.",
-      "model": "local4080/glm-4.7-flash",
+      "description": "Drafts self-contained artifacts on barza (Qwen3.8-27B at Q5) \u2014 a new module, a config, a plan, a test file. Scored 51/51 on an executed code benchmark where the GLMs scored 47 and 45. Returns the artifact in its reply; it does not edit the repository.",
+      "model": "barza/qwen3.8-27b",
       "temperature": 0.6,
       "permission": {
         "edit": "deny",
