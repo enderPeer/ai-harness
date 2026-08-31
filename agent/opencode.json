@@ -51,6 +51,22 @@
           }
         }
       }
+    },
+    "specht-qwen": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "Qwen3.8-27B \u2014 night coder on specht",
+      "options": {
+        "baseURL": "http://127.0.0.1:9089/v1"
+      },
+      "models": {
+        "qwen3.8-27b": {
+          "name": "Qwen3.8-27B Q5_K_S (specht, 262k native)",
+          "limit": {
+            "context": 262144,
+            "output": 32768
+          }
+        }
+      }
     }
   },
   "mcp": {

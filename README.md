@@ -16,6 +16,7 @@ people.
 |---|---|---|---|
 | Fast | RTX 4080 16GB (local) | GLM-4.7-Flash Q3, 1×32k ctx, ~136 tok/s | interactive drafting; hosts the 3D swap |
 | Deep | 2× AMD RX 9070XT/9060XT (remote) | one llama.cpp Vulkan server across **both** cards, **131k context** | whole-codebase audits, long documents |
+| Night | the same two AMD cards, optionally + adler's 4090 over LAN RPC | Qwen3.8-27B Q5_K_S, **262k native context** | the overnight coder: slow, capable, unattended |
 | Reserve | 64GB DDR5 / 45GB RAM boxes | RAM+CPU hybrid (gpt-oss-120b class), on demand | slow, smarter, 24/7-tolerant jobs |
 | Accurate | RTX PRO 4500 (off-site, barza) | Qwen3.8-27B **Q5_K_S**, 32k ctx, ~35 tok/s | drafting where correctness beats speed |
 | Art | RTX 4090 24GB (remote) | Ideogram 4 / Qwen Edit / Z-Image server | free textures, concepts, key art |
@@ -81,6 +82,44 @@ to connect with no useful error — `start-cluster.ps1` sets it, and it is a use
 environment variable so the TUI picks it up too. Verify a cert you were handed
 before trusting it: `openssl x509 -in barza-llama.crt -noout -fingerprint -sha256`
 should match the fingerprint in the endpoint's own documentation.
+
+### The night coder
+
+The day job and the night job want opposite things. Daytime work is
+interactive — you want tokens now, and a human is reading them. Overnight work
+is the reverse: nobody is watching, so throughput barely matters and capability
+is everything.
+
+`scripts/night-coder.ps1` flips the text tier between the two:
+
+```powershell
+night-coder.ps1 -Start                  # Qwen3.8-27B at 262k on specht
+night-coder.ps1 -Start -WithAdler       # + the 4090 over LAN RPC, for bigger contexts
+night-coder.ps1 -Stop                   # back to the GLM; the 4090 returns to ComfyUI
+night-coder.ps1 -Status
+```
+
+Nothing is uninstalled in either direction — the GLM keeps port 8088 and its
+config, Qwen gets 8089, and only one is resident because specht's 30 GB of VRAM
+cannot hold both.
+
+Why this model is the one worth running overnight: of its 64 layers only **16
+keep a KV cache** — the other 48 use gated DeltaNet linear attention, which
+holds a fixed-size recurrent state instead. Context costs roughly a quarter of
+what a conventional 27B charges:
+
+| Context | KV at q8_0 | A conventional 27B would want |
+|---|---|---|
+| 262,144 (native) | ~8.9 GB | ~34 GB |
+| 1,000,000 | ~34 GB | ~131 GB |
+
+**On chasing 1M.** It is reachable — adler and specht share a LAN, so
+llama.cpp RPC can pool 54 GB of VRAM across three cards. But past 262,144 the
+model needs static YaRN, which stretches position encoding on *every* prompt,
+short ones included, and it costs a weaker quant and a coarser KV cache to fit.
+Three quality penalties, paid on every request, to buy headroom that most agent
+turns never touch. 262k native is already 2× the GLM and 8× what barza serves.
+Reach for 1M deliberately, not by default.
 
 ### Which worker is actually best
 

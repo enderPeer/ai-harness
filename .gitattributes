@@ -1,0 +1,5 @@
+# Shell scripts run on Fedora; CRLF turns the shebang into "#!/bin/bash\r"
+# and the kernel reports "bad interpreter". Keep them LF whatever the checkout
+# platform does.
+*.sh text eol=lf
+*.py text eol=lf

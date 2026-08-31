@@ -50,6 +50,14 @@ it by default (`no_think`), and `glm.ps1` has `-NoThink`.
   and no gallery login involved — ComfyUI is ours, over the tunnel.
 - `remote_run` — a shell on `adler` or `specht` as user `end`.
 
+## Day and night
+
+The text tier has two personalities and one set of cards. `night-coder.ps1
+-Start` puts Qwen3.8-27B (262k, capable, slow) on specht; `-Stop` restores the
+GLM (131k, fast). Only one is resident at a time. If a request to `specht-qwen`
+fails, the tier is probably in day mode — check `night-coder.ps1 -Status`
+rather than assuming the model is broken.
+
 ## Things that will bite you
 
 - **Never `ssh -L` to a server port.** It fails at the last hop and the audit
