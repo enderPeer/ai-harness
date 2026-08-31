@@ -32,9 +32,33 @@ mkdir -p "$LOGDIR"
 
 running() { pgrep -f "llama-server.*--port $1" >/dev/null 2>&1; }
 
+# Stop whatever serves $1 and do not return success until it is actually gone.
+# SIGTERM first, then SIGKILL: a server unmapping 13 GB of VRAM can sit in
+# TERM for a long time, and "I asked it to stop" is not the same as "it stopped".
 stop_port() {
-    pkill -f "llama-server.*--port $1" >/dev/null 2>&1
-    for _ in $(seq 20); do running "$1" || return 0; sleep 0.5; done
+    local port="$1" pids
+    running "$port" || return 0
+    pkill -f "llama-server.*--port $port" >/dev/null 2>&1
+    for _ in $(seq 60); do running "$port" || return 0; sleep 0.5; done
+
+    pids=$(pgrep -f "llama-server.*--port $port")
+    echo "[stop] port $port ignored SIGTERM for 30s; sending SIGKILL to: $pids"
+    kill -9 $pids 2>/dev/null
+    for _ in $(seq 20); do running "$port" || return 0; sleep 0.5; done
+
+    echo "[stop] FAILED: something is still serving port $port"
+    return 1
+}
+
+# Free VRAM across the two AMD cards, in MiB.
+free_vram_mib() {
+    local total=0 c t
+    for c in 0 2; do
+        t=/sys/class/drm/card$c/device
+        [ -f "$t/mem_info_vram_total" ] || continue
+        total=$(( total + ($(cat "$t/mem_info_vram_total") - $(cat "$t/mem_info_vram_used")) / 1048576 ))
+    done
+    echo "$total"
 }
 
 case "${1:-status}" in
@@ -43,12 +67,31 @@ start)
     ctx="${2:-$NATIVE_CTX}"
     [ -f "$MODEL" ] || { echo "model not found: $MODEL"; exit 1; }
 
-    # One model at a time on this card set.
+    # One model at a time on this card set. Loading a second one while the first
+    # is still resident overcommits the cards, spills into system RAM, and takes
+    # the whole box down to where sshd cannot fork — so this is a hard gate, not
+    # a best effort. It has happened; do not soften it.
     if running "$GLM_PORT"; then
         echo "[qwen] stopping GLM on $GLM_PORT to free VRAM"
-        stop_port "$GLM_PORT"
+        if ! stop_port "$GLM_PORT"; then
+            echo "[qwen] ABORTING: the GLM is still holding VRAM. Nothing was started."
+            exit 1
+        fi
     fi
-    stop_port "$PORT"
+    if ! stop_port "$PORT"; then
+        echo "[qwen] ABORTING: port $PORT is still occupied. Nothing was started."
+        exit 1
+    fi
+
+    # Weights are ~18 GB; anything under that plus a little slack cannot work.
+    need=20000
+    have=$(free_vram_mib)
+    if [ "${have:-0}" -lt "$need" ]; then
+        echo "[qwen] ABORTING: only ${have} MiB of VRAM free across both cards, need >= ${need}."
+        echo "[qwen] something else is still resident — check 'pgrep -af llama-server'."
+        exit 1
+    fi
+    echo "[qwen] ${have} MiB VRAM free — proceeding"
 
     args=(-m "$MODEL" --host 127.0.0.1 --port "$PORT"
           --device Vulkan1,Vulkan2          # the two AMD cards; Vulkan0 is the Intel iGPU

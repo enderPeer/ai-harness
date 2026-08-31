@@ -75,4 +75,5 @@ Say (Test-Url 'http://127.0.0.1:8080/health')           'GLM-4.7-Flash      http
 Say (Test-Url 'http://127.0.0.1:9088/health' 8)         'GLM-4.7-Flash 131k http://127.0.0.1:9088/   — chat, specht 2x AMD'
 Say (Test-Url 'http://127.0.0.1:9188/system_stats' 8)   'ComfyUI            http://127.0.0.1:9188/   — images, adler RTX 4090'
 Say (Test-Url 'http://127.0.0.1:8096/config' 8)         'opencode           http://127.0.0.1:8096/   — coding agent driving all of the above'
+Say (Test-Url 'http://127.0.0.1:9089/health' 8)         'Qwen3.8 night      http://127.0.0.1:9089/   — 262k overnight coder (shares cards with the GLM)'
 Write-Host ""

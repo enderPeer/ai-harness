@@ -37,6 +37,9 @@ WORKERS = {
     "local": os.environ.get("LOCAL_LLM_URL", "http://127.0.0.1:8080"),
     "specht": os.environ.get("SPECHT_LLM_URL", "http://127.0.0.1:9088"),
     "barza": os.environ.get("BARZA_LLM_URL", "https://185.41.242.227:53018"),
+    # The night coder shares specht's cards with the GLM, so exactly one of
+    # "specht" and "night" answers at a time. See scripts/night-coder.ps1.
+    "night": os.environ.get("NIGHT_LLM_URL", "http://127.0.0.1:9089"),
 }
 # barza is off-site: TLS with a self-signed cert (no public CA can issue for a
 # bare IP) plus a bearer key. Both live in ~/.config, never in this repo.
@@ -121,6 +124,7 @@ def t_cluster_status(_args: dict) -> str:
         ("llm local (RTX 4080, 32k)", WORKERS["local"], f"{WORKERS['local']}/health"),
         ("llm specht (2x AMD, 131k)", WORKERS["specht"], f"{WORKERS['specht']}/health"),
         ("llm barza (Qwen3.8-27B Q5)", WORKERS["barza"], f"{WORKERS['barza']}/health"),
+        ("llm night (Qwen3.8 262k)", WORKERS["night"], f"{WORKERS['night']}/health"),
         ("ComfyUI (adler RTX 4090)", COMFY, f"{COMFY}/system_stats"),
     ]:
         lines.append(f"{'up  ' if alive(probe) else 'DOWN'} {name:28} {url}")
@@ -300,9 +304,16 @@ def t_worker_ask(args: dict) -> str:
     prompt = args.get("prompt", "")
     if not prompt:
         return "error: `prompt` is required"
-    worker = args.get("worker", "specht")
+    worker = args.get("worker") or "night"
     if worker not in WORKERS:
         return f"error: worker must be one of {', '.join(WORKERS)}"
+    # night and specht take turns on the same two cards. If the caller did not
+    # name one explicitly, use whichever is actually resident rather than
+    # failing on a tier that is simply off shift.
+    note = ""
+    if not args.get("worker") and not alive(f"{WORKERS['night']}/health", timeout=3):
+        worker = "specht"
+        note = "\n(night coder is off shift; answered by the GLM instead)"
     files = args.get("files") or []
     for f in files:
         p = Path(f)
@@ -333,7 +344,7 @@ def t_worker_ask(args: dict) -> str:
     usage = r.get("usage", {})
     text = r["choices"][0]["message"].get("content") or "(empty)"
     return (f"{text}\n\n--- {worker}: {usage.get('completion_tokens', '?')} tokens "
-            f"in {time.time() - t0:.0f}s (free) ---")
+            f"in {time.time() - t0:.0f}s (free) ---{note}")
 
 
 TOOLS = [
@@ -416,7 +427,7 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "prompt": {"type": "string"},
-                "worker": {"type": "string", "enum": ["specht", "local", "barza"], "description": "specht = 131k context for long documents; local = fastest; barza = most accurate on self-contained code. Default specht."},
+                "worker": {"type": "string", "enum": ["specht", "local", "barza", "night"], "description": "night = Qwen3.8-27B at 262k, the most capable and the one to hand real work to; specht = GLM at 131k; local = fastest; barza = same model as night but off-site at 32k. night and specht share cards, so only one answers at a time. Default night, falling back to specht."},
                 "files": {"type": "array", "items": {"type": "string"}, "description": "Files to append to the prompt."},
                 "system": {"type": "string"},
                 "max_tokens": {"type": "integer"},
