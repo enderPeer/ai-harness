@@ -1,5 +1,7 @@
 #!/bin/bash
-# Qwen3.8-27B — the overnight coder. Runs on specht, port 8089.
+# Qwen3.8-27B — the overnight coder. Defaults to specht on port 8089, but every
+# host-specific value is an environment override (see the config block), so
+# moving to another box is a matter of NIGHT_* variables, not an edit.
 #
 # The GLM on 8088 is left completely alone as a config, but the two cannot be
 # *resident* at once: specht has 30 GB of VRAM and Qwen wants most of it. So
@@ -19,14 +21,21 @@
 # slightly worse at everything else. Only ask for it if you need it.
 
 set -u
-LLAMA=~/llama/b10717
-MODEL=~/models/Qwen3.8-27B-UD-Q5_K_S.gguf
-GLM_MODEL=~/models/GLM-4.7-Flash-UD-Q3_K_XL.gguf
-PORT=8089
-GLM_PORT=8088
-NATIVE_CTX=262144
-LOGDIR=~/logs
-ADLER_RPC="192.168.178.171:50052"   # same LAN, not through a tunnel
+# Everything host-specific is overridable, so moving this stack to another box
+# is a handful of environment variables rather than an edit. Defaults describe
+# specht: two AMD cards on Vulkan1/Vulkan2 (Vulkan0 is an Intel iGPU) exposed
+# as DRM card0 and card2.
+LLAMA="${NIGHT_LLAMA:-$HOME/llama/b10717}"
+MODEL="${NIGHT_MODEL:-$HOME/models/Qwen3.8-27B-UD-Q5_K_S.gguf}"
+GLM_MODEL="${NIGHT_GLM_MODEL:-$HOME/models/GLM-4.7-Flash-UD-Q3_K_XL.gguf}"
+PORT="${NIGHT_PORT:-8089}"
+GLM_PORT="${NIGHT_GLM_PORT:-8088}"
+NATIVE_CTX=262144                          # a property of the model, not the host
+LOGDIR="${NIGHT_LOGDIR:-$HOME/logs}"
+DEVICES="${NIGHT_DEVICES:-Vulkan1,Vulkan2}"
+CARDS="${NIGHT_CARDS:-0 2}"                # DRM cards to total free VRAM over
+WEIGHTS_MIB="${NIGHT_WEIGHTS_MIB:-18700}"  # Q5_K_S; change with the quant
+ADLER_RPC="${NIGHT_RPC:-192.168.178.171:50052}"   # same LAN, not through a tunnel
 
 mkdir -p "$LOGDIR"
 
@@ -53,7 +62,7 @@ stop_port() {
 # Free VRAM across the two AMD cards, in MiB.
 free_vram_mib() {
     local total=0 c t
-    for c in 0 2; do
+    for c in $CARDS; do
         t=/sys/class/drm/card$c/device
         [ -f "$t/mem_info_vram_total" ] || continue
         total=$(( total + ($(cat "$t/mem_info_vram_total") - $(cat "$t/mem_info_vram_used")) / 1048576 ))
@@ -63,7 +72,10 @@ free_vram_mib() {
 
 case "${1:-status}" in
 
-start)
+start|foreground)
+    # `start` detaches (interactive use); `foreground` execs the server so
+    # systemd can supervise it. Every check below runs identically in both.
+    mode="$1"
     ctx="${2:-$NATIVE_CTX}"
     [ -f "$MODEL" ] || { echo "model not found: $MODEL"; exit 1; }
 
@@ -111,7 +123,6 @@ start)
     # KV maths for this model: 16 of 64 layers keep a cache (the rest are gated
     # DeltaNet), 4 KV heads x 256 head_dim x 2 for K and V = 32768 values/token,
     # ~1.0625 bytes each at q8_0 => ~34 KiB per token.
-    WEIGHTS_MIB=18700
     kv_mib=$(( ctx * 34816 / 1048576 ))
     need=$(( WEIGHTS_MIB + kv_mib + 2000 ))     # 2 GB for compute buffers
     have=$(free_vram_mib)
@@ -131,9 +142,9 @@ start)
         exit 1
     fi
 
-    # Vulkan0 is the Intel iGPU — never give it work. The RPC device is appended
-    # only when llama.cpp actually reported one.
-    devices="Vulkan1,Vulkan2"
+    # NIGHT_DEVICES excludes any integrated GPU on purpose. The RPC device is
+    # appended only when llama.cpp actually reported one.
+    devices="$DEVICES"
     [ -n "$rpc_device" ] && devices="$devices,$rpc_device"
 
     args=(-m "$MODEL" --host 127.0.0.1 --port "$PORT"
@@ -152,8 +163,16 @@ start)
         args+=(--rope-scaling yarn --rope-scale "$scale" --yarn-orig-ctx "$NATIVE_CTX")
     fi
 
-    echo "[qwen] starting: ctx=$ctx"
+    echo "[qwen] starting: ctx=$ctx (mode: $mode)"
     cd "$LLAMA" || exit 1
+
+    if [ "$mode" = "foreground" ]; then
+        # Under systemd: become the server, so the unit tracks the real process
+        # and a crash is a unit failure rather than a silently missing daemon.
+        export LD_LIBRARY_PATH="$LLAMA"
+        exec ./llama-server "${args[@]}"
+    fi
+
     LD_LIBRARY_PATH="$LLAMA" setsid nohup ./llama-server "${args[@]}" \
         >> "$LOGDIR/qwen-server.log" 2>&1 < /dev/null &
     echo "[qwen] launched; watch $LOGDIR/qwen-server.log (a 262k context takes a while to allocate)"
@@ -168,7 +187,7 @@ glm)
     if running "$GLM_PORT"; then echo "[glm] already running"; exit 0; fi
     cd "$LLAMA" || exit 1
     LD_LIBRARY_PATH="$LLAMA" setsid nohup ./llama-server -m "$GLM_MODEL" \
-        --device Vulkan1,Vulkan2 -ngl 999 -c 131072 -np 1 -ctk q8_0 -ctv q8_0 \
+        --device "$DEVICES" -ngl 999 -c 131072 -np 1 -ctk q8_0 -ctv q8_0 \
         --host 127.0.0.1 --port "$GLM_PORT" \
         >> "$LOGDIR/glm-server.log" 2>&1 < /dev/null &
     echo "[glm] restored on $GLM_PORT (131k)"
