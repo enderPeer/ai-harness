@@ -59,7 +59,8 @@ Write-Host "`nai-harness — bringing the cluster up`n" -ForegroundColor Cyan
 Start-Wireproxy 'adler' 1080
 Start-Wireproxy 'specht' 1081
 
-Start-Relay 'specht' 1081 '10.72.0.1' 18088 8088 '10.72.0.12'   # llama.cpp 131k
+Start-Relay 'specht' 1081 '10.72.0.1' 18088 8088 '10.72.0.12'   # GLM 131k
+Start-Relay 'specht' 1081 '10.72.0.1' 18089 8089 '10.72.0.12'   # Qwen3.8 night coder
 Start-Relay 'adler'  1080 '10.71.0.1' 18188 8188 '10.71.0.12'   # ComfyUI on the 4090
 
 Start-Local 'llama-server (4080)' 8080 'C:\llama.cpp\start-glm-server.cmd' @()

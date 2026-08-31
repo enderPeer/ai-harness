@@ -83,32 +83,68 @@ start)
         exit 1
     fi
 
-    # Weights are ~18 GB; anything under that plus a little slack cannot work.
-    need=20000
+    # Decide about the RPC backend FIRST — the memory check below depends on
+    # whether adler's 24 GB is in the pool, and the device list depends on it too.
+    rpc_device=""
+    if timeout 2 bash -c "</dev/tcp/${ADLER_RPC%%:*}/${ADLER_RPC##*:}" 2>/dev/null; then
+        # Ask llama.cpp what it calls the remote card. Guessing the name is how
+        # adler ended up idle while specht tried to hold the whole model alone:
+        # naming only Vulkan1,Vulkan2 in --device silently EXCLUDES the RPC
+        # device, so the backend connects, is never given work, and disconnects.
+        rpc_device=$(cd "$LLAMA" && LD_LIBRARY_PATH="$LLAMA" ./llama-server --rpc "$ADLER_RPC" \
+                     --list-devices 2>/dev/null | grep -oiE "^\s*(RPC[0-9]+)" | head -1 | tr -d ' ')
+        if [ -n "$rpc_device" ]; then
+            echo "[qwen] adler's 4090 joins the pool as device $rpc_device"
+        else
+            echo "[qwen] adler's rpc-server answers but llama.cpp lists no RPC device;"
+            echo "[qwen] continuing on specht's cards alone rather than pretending it helps."
+        fi
+    else
+        echo "[qwen] adler rpc-server not up; specht's two cards only"
+    fi
+
+    # Does the requested context actually FIT? This is the check whose absence
+    # took the box down: "20 GB is free" says nothing about whether a 1M window
+    # needs 52. llama.cpp will not refuse — it spills the overflow into system
+    # RAM and the machine dies with sshd unable to fork.
+    #
+    # KV maths for this model: 16 of 64 layers keep a cache (the rest are gated
+    # DeltaNet), 4 KV heads x 256 head_dim x 2 for K and V = 32768 values/token,
+    # ~1.0625 bytes each at q8_0 => ~34 KiB per token.
+    WEIGHTS_MIB=18700
+    kv_mib=$(( ctx * 34816 / 1048576 ))
+    need=$(( WEIGHTS_MIB + kv_mib + 2000 ))     # 2 GB for compute buffers
     have=$(free_vram_mib)
-    if [ "${have:-0}" -lt "$need" ]; then
-        echo "[qwen] ABORTING: only ${have} MiB of VRAM free across both cards, need >= ${need}."
-        echo "[qwen] something else is still resident — check 'pgrep -af llama-server'."
+
+    # An attached RPC backend adds its own VRAM to the pool — but only if the
+    # device list below actually includes it.
+    if [ -n "${rpc_device:-}" ]; then
+        have=$(( have + ${RPC_VRAM_MIB:-23000} ))
+    fi
+
+    echo "[qwen] ctx $ctx needs ~${kv_mib} MiB KV + ${WEIGHTS_MIB} MiB weights = ~${need} MiB; ${have} MiB available"
+    if [ "$need" -gt "$have" ]; then
+        fits=$(( (have - WEIGHTS_MIB - 2000) * 1048576 / 34816 ))
+        echo "[qwen] ABORTING: that does not fit. Nothing was started."
+        echo "[qwen] the largest context this pool holds is about ${fits} tokens."
+        [ -z "${rpc_device:-}" ] && echo "[qwen] (start adler's rpc-server to add its 4090 and try again)"
         exit 1
     fi
-    echo "[qwen] ${have} MiB VRAM free — proceeding"
+
+    # Vulkan0 is the Intel iGPU — never give it work. The RPC device is appended
+    # only when llama.cpp actually reported one.
+    devices="Vulkan1,Vulkan2"
+    [ -n "$rpc_device" ] && devices="$devices,$rpc_device"
 
     args=(-m "$MODEL" --host 127.0.0.1 --port "$PORT"
-          --device Vulkan1,Vulkan2          # the two AMD cards; Vulkan0 is the Intel iGPU
+          --device "$devices"
           -ngl 999 -np 1                    # one slot: the whole window goes to one conversation
           -c "$ctx"
           -ctk q8_0 -ctv q8_0               # halves KV vs f16 at negligible quality cost
           --jinja                           # required for this model's tool-call template
           --no-mmap)
-
-    # Borrow adler's 4090 over the LAN when its rpc-server is up. That is what
-    # makes contexts past ~300k possible at all.
-    if timeout 2 bash -c "</dev/tcp/${ADLER_RPC%%:*}/${ADLER_RPC##*:}" 2>/dev/null; then
-        echo "[qwen] adler rpc-server reachable — adding its 4090 to the pool"
-        args+=(--rpc "$ADLER_RPC")
-    else
-        echo "[qwen] adler rpc-server not up; running on specht's two cards only"
-    fi
+    [ -n "$rpc_device" ] && args+=(--rpc "$ADLER_RPC")
+    echo "[qwen] devices: $devices"
 
     if [ "$ctx" -gt "$NATIVE_CTX" ]; then
         scale=$(awk "BEGIN{printf \"%.4f\", $ctx/$NATIVE_CTX}")
