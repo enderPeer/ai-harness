@@ -113,13 +113,39 @@ what a conventional 27B charges:
 | 262,144 (native) | ~8.9 GB | ~34 GB |
 | 1,000,000 | ~34 GB | ~131 GB |
 
-**On chasing 1M.** It is reachable — adler and specht share a LAN, so
-llama.cpp RPC can pool 54 GB of VRAM across three cards. But past 262,144 the
-model needs static YaRN, which stretches position encoding on *every* prompt,
-short ones included, and it costs a weaker quant and a coarser KV cache to fit.
-Three quality penalties, paid on every request, to buy headroom that most agent
-turns never touch. 262k native is already 2× the GLM and 8× what barza serves.
-Reach for 1M deliberately, not by default.
+**On chasing 1M — measured, and the answer is no.** Not because of memory:
+adler and specht share a LAN, so llama.cpp RPC really does pool ~55 GB across
+three cards, and a 750k window allocates fine. The blocker is that llama-server
+refuses to *use* it:
+
+```
+W srv load_model: the slot context (750080) exceeds the training
+                  context of the model (262144) - capping
+I srv load_model: initializing, n_slots = 1, n_ctx_slot = 262144
+```
+
+The slot is capped at the model's trained context whatever `-c` and the YaRN
+flags say, and no flag in this build lifts it. Asking for 750k allocated 23 GB
+of KV and delivered 262,144 usable tokens — the memory cost of the large window
+with none of the benefit.
+
+Which also settles whether to pool adler's 4090 at all: it buys no usable
+context, and it costs speed. Measured on the same 24k prompt:
+
+| | specht alone | + adler over RPC |
+|---|---|---|
+| Prompt eval | **775.6 tok/s** (31 s) | 400.7 tok/s (60 s) |
+| Generation | **16.5 tok/s** | 14.2 tok/s |
+| Usable context | 262,144 | 262,144 |
+
+Worse on both axes for nothing. There is a mechanism behind it: with an RPC
+device attached, specht's share landed in GTT — system RAM mapped for the GPU,
+visible as `mem_info_gtt_used` while `mem_info_vram_used` sat at 57 MiB — so
+half the model was running out of host memory. Specht alone keeps everything in
+real VRAM.
+
+So the night coder runs on specht's two cards, at 262,144, and the 4090 stays
+on image and 3D work where it earns more.
 
 ### Which worker is actually best
 

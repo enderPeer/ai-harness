@@ -60,6 +60,10 @@ rather than assuming the model is broken.
 
 ## Things that will bite you
 
+- **262,144 is the night model's hard ceiling**, not a tuning choice.
+  llama-server caps the slot at the model's trained context and says so in the
+  log; `-c` beyond it allocates the memory and gives you nothing. Do not pool
+  extra GPUs hoping for more context — it buys none and halves prompt speed.
 - **Never `ssh -L` to a server port.** It fails at the last hop and the audit
   log stays clean about it. Use `net/wgexpose.py` + a wireproxy
   `[TCPClientTunnel]`, or run the command server-side with `remote_run`.

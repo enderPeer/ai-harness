@@ -1,24 +1,28 @@
 #!/bin/bash
-# Qwen3.8-27B — the overnight coder. Defaults to specht on port 8089, but every
-# host-specific value is an environment override (see the config block), so
-# moving to another box is a matter of NIGHT_* variables, not an edit.
+# The overnight coder. Serves whichever model NIGHT_MODEL points at on port
+# 8089; memory constants for each known model are in the table below. Every
+# host-specific value is an environment override, so moving to another box is a
+# matter of NIGHT_* variables rather than an edit.
+#
+#   Qwen3-Coder-Next   80B MoE, ~3B active, coding-specialised, no thinking
+#                      mode. 36.6 GB of weights: needs specht AND adler's 4090
+#                      pooled over RPC. Cheap context (~12.75 KiB/token).
+#   Qwen3.8-27B        dense, fits specht alone, ~34 KiB/token.
 #
 # The GLM on 8088 is left completely alone as a config, but the two cannot be
 # *resident* at once: specht has 30 GB of VRAM and Qwen wants most of it. So
 # `start` stops the GLM first and `glm` brings it back. Nothing is deleted
 # either way — switching is a one-word command in both directions.
 #
-# Why this model: 64 layers but only 16 keep a KV cache (the other 48 use gated
-# DeltaNet linear attention), so context is roughly 4x cheaper than a normal
-# 27B. 262,144 is the native window and needs no rope scaling.
+# Both models are hybrid-attention: only every 4th layer keeps a KV cache, the
+# rest use gated DeltaNet, which is why a 262k window costs single-digit GB.
 #
 #   qwen-service.sh start [ctx]     # default 262144, native, no YaRN
-#   qwen-service.sh start 1000000   # YaRN-scaled — see the warning below
 #   qwen-service.sh stop | status | glm
 #
-# A ctx above 262144 switches on static YaRN, which stretches position encoding
-# for every prompt, including short ones. It buys context by making the model
-# slightly worse at everything else. Only ask for it if you need it.
+# Do not bother asking for more than 262144. llama-server caps the slot at the
+# model's trained context and logs "exceeds the training context - capping";
+# a larger -c allocates the memory and gives you nothing back. Measured.
 
 set -u
 # Everything host-specific is overridable, so moving this stack to another box
@@ -34,8 +38,23 @@ NATIVE_CTX=262144                          # a property of the model, not the ho
 LOGDIR="${NIGHT_LOGDIR:-$HOME/logs}"
 DEVICES="${NIGHT_DEVICES:-Vulkan1,Vulkan2}"
 CARDS="${NIGHT_CARDS:-0 2}"                # DRM cards to total free VRAM over
-WEIGHTS_MIB="${NIGHT_WEIGHTS_MIB:-18700}"  # Q5_K_S; change with the quant
 ADLER_RPC="${NIGHT_RPC:-192.168.178.171:50052}"   # same LAN, not through a tunnel
+
+# Per-model memory constants. KV bytes/token is read off each model's own GGUF
+# metadata, not guessed: (layers / full_attention_interval) x 2 for K and V
+# x head_count_kv x key_length, at ~1.0625 bytes per value for q8_0.
+#
+#   Qwen3-Coder-Next  48 layers, interval 4 => 12 keep KV, 2 kv heads, dim 256
+#                     => 12*2*2*256*1.0625  = ~13056 B/token
+#   Qwen3.8-27B       64 layers, interval 4 => 16 keep KV, 4 kv heads, dim 256
+#                     => 16*2*4*256*1.0625  = ~34816 B/token
+case "$(basename "$MODEL")" in
+    *Coder-Next*)   DEF_WEIGHTS=36650; DEF_KV=13056 ;;
+    *Qwen3.8-27B*)  DEF_WEIGHTS=18700; DEF_KV=34816 ;;
+    *)              DEF_WEIGHTS=20000; DEF_KV=34816 ;;   # unknown: assume the costlier shape
+esac
+WEIGHTS_MIB="${NIGHT_WEIGHTS_MIB:-$DEF_WEIGHTS}"
+KV_BYTES="${NIGHT_KV_BYTES:-$DEF_KV}"
 
 mkdir -p "$LOGDIR"
 
@@ -123,8 +142,16 @@ start|foreground)
     # KV maths for this model: 16 of 64 layers keep a cache (the rest are gated
     # DeltaNet), 4 KV heads x 256 head_dim x 2 for K and V = 32768 values/token,
     # ~1.0625 bytes each at q8_0 => ~34 KiB per token.
-    kv_mib=$(( ctx * 34816 / 1048576 ))
-    need=$(( WEIGHTS_MIB + kv_mib + 2000 ))     # 2 GB for compute buffers
+    # Compute buffers scale with context and are allocated PER DEVICE, which a
+    # flat allowance got badly wrong: a 1M attempt died on
+    # "failed to allocate RPC0 buffer of size 4305584256" — 4.3 GB on one card,
+    # after weights and KV had already filled it. Measured at ~4.4 GB per device
+    # per 1M tokens; three devices in the pool.
+    kv_mib=$(( ctx * KV_BYTES / 1048576 ))
+    ndev=2; [ -n "${rpc_device:-}" ] && ndev=3
+    compute_mib=$(( ctx * 4400 * ndev / 1000000 ))
+    [ "$compute_mib" -lt 2000 ] && compute_mib=2000
+    need=$(( WEIGHTS_MIB + kv_mib + compute_mib ))
     have=$(free_vram_mib)
 
     # An attached RPC backend adds its own VRAM to the pool — but only if the
@@ -133,9 +160,11 @@ start|foreground)
         have=$(( have + ${RPC_VRAM_MIB:-23000} ))
     fi
 
-    echo "[qwen] ctx $ctx needs ~${kv_mib} MiB KV + ${WEIGHTS_MIB} MiB weights = ~${need} MiB; ${have} MiB available"
+    echo "[qwen] ctx $ctx needs ~${kv_mib} MiB KV + ${WEIGHTS_MIB} weights + ${compute_mib} compute = ~${need} MiB; ${have} MiB available"
     if [ "$need" -gt "$have" ]; then
-        fits=$(( (have - WEIGHTS_MIB - 2000) * 1048576 / 34816 ))
+        # Solve for the context where KV + per-device compute buffers exhaust
+        # what is left after the weights.
+        fits=$(awk "BEGIN{printf \"%d\", ($have - $WEIGHTS_MIB) / ($KV_BYTES/1048576.0 + 4400*$ndev/1000000.0)}")
         echo "[qwen] ABORTING: that does not fit. Nothing was started."
         echo "[qwen] the largest context this pool holds is about ${fits} tokens."
         [ -z "${rpc_device:-}" ] && echo "[qwen] (start adler's rpc-server to add its 4090 and try again)"
@@ -147,14 +176,17 @@ start|foreground)
     devices="$DEVICES"
     [ -n "$rpc_device" ] && devices="$devices,$rpc_device"
 
-    args=(-m "$MODEL" --host 127.0.0.1 --port "$PORT"
-          --device "$devices"
-          -ngl 999 -np 1                    # one slot: the whole window goes to one conversation
-          -c "$ctx"
-          -ctk q8_0 -ctv q8_0               # halves KV vs f16 at negligible quality cost
-          --jinja                           # required for this model's tool-call template
-          --no-mmap)
+    # --rpc MUST precede --device. Arguments are validated in order, so naming
+    # RPC0 before the RPC backend is registered fails with "invalid device:
+    # RPC0" and the server exits during startup.
+    args=(-m "$MODEL" --host 127.0.0.1 --port "$PORT")
     [ -n "$rpc_device" ] && args+=(--rpc "$ADLER_RPC")
+    args+=(--device "$devices"
+           -ngl 999 -np 1                   # one slot: the whole window goes to one conversation
+           -c "$ctx"
+           -ctk q8_0 -ctv q8_0              # halves KV vs f16 at negligible quality cost
+           --jinja                          # required for this model's tool-call template
+           --no-mmap)
     echo "[qwen] devices: $devices"
 
     if [ "$ctx" -gt "$NATIVE_CTX" ]; then
@@ -175,7 +207,19 @@ start|foreground)
 
     LD_LIBRARY_PATH="$LLAMA" setsid nohup ./llama-server "${args[@]}" \
         >> "$LOGDIR/qwen-server.log" 2>&1 < /dev/null &
-    echo "[qwen] launched; watch $LOGDIR/qwen-server.log (a 262k context takes a while to allocate)"
+    child=$!
+
+    # "launched" is not the same as "running". A bad argument makes llama-server
+    # exit in under a second while this script cheerfully reports success — that
+    # is how an "invalid device: RPC0" went unnoticed through a whole load wait.
+    sleep 6
+    if ! kill -0 "$child" 2>/dev/null && ! running "$PORT"; then
+        echo "[qwen] FAILED: the server exited during startup. Last lines:"
+        grep -iE "error|invalid|failed|unknown|usage" "$LOGDIR/qwen-server.log" | tail -5
+        exit 1
+    fi
+    echo "[qwen] running (pid $child); loading — a large context takes minutes to allocate."
+    echo "[qwen] watch: tail -f $LOGDIR/qwen-server.log"
     ;;
 
 stop)

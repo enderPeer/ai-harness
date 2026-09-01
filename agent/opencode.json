@@ -60,7 +60,7 @@
       },
       "models": {
         "qwen3.8-27b": {
-          "name": "Qwen3.8-27B Q5_K_S (specht, 262k native)",
+          "name": "Qwen3.8-27B Q5_K_S (specht, 262k \u2014 the model's hard ceiling)",
           "limit": {
             "context": 262144,
             "output": 32768
