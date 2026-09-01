@@ -1,6 +1,5 @@
 ---
 description: Fan the task out across the cluster — scout, parallel drafts, independent verification, then one synthesis
-agent: build
 ---
 
 Work on this the exhaustive way, using the whole cluster rather than your own

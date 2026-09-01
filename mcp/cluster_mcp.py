@@ -422,12 +422,12 @@ TOOLS = [
     },
     {
         "name": "worker_ask",
-        "description": "Delegate a self-contained task to a free LLM worker: 'specht' has 131k context (whole-file audits, long documents), 'local' is fastest at ~100 tok/s and 32k, 'barza' is Qwen3.8-27B at Q5 (32k, ~35 tok/s) and scored 51/51 against the GLMs' 47 and 45 on an executed code benchmark — prefer it when correctness matters more than speed. Workers reliably produce self-contained artifacts — summaries, plans, single modules, reviews — and reliably fail at quoting existing code verbatim. Costs nothing, so prefer it over doing bulk reading yourself.",
+        "description": "Delegate a self-contained task to a free LLM worker: 'specht' has 131k context (whole-file audits, long documents), 'local' is fastest at ~100 tok/s and 32k, 'barza' is Qwen3.8-27B at Q5 (262k, ~35 tok/s) and scored 51/51 against the GLMs' 47 and 45 on an executed code benchmark — prefer it when correctness matters more than speed. Workers reliably produce self-contained artifacts — summaries, plans, single modules, reviews — and reliably fail at quoting existing code verbatim. Costs nothing, so prefer it over doing bulk reading yourself.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "prompt": {"type": "string"},
-                "worker": {"type": "string", "enum": ["specht", "local", "barza", "night"], "description": "night = Qwen3.8-27B at 262k, the most capable and the one to hand real work to; specht = GLM at 131k; local = fastest; barza = same model as night but off-site at 32k. night and specht share cards, so only one answers at a time. Default night, falling back to specht."},
+                "worker": {"type": "string", "enum": ["specht", "local", "barza", "night"], "description": "night = Qwen3.8-27B at 262k, the most capable and the one to hand real work to; specht = GLM at 131k; local = fastest; barza = the same model as night, off-site on a Blackwell and also at 262k — it answers whether or not specht is in night mode. night and specht share cards, so only one answers at a time. Default night, falling back to specht."},
                 "files": {"type": "array", "items": {"type": "string"}, "description": "Files to append to the prompt."},
                 "system": {"type": "string"},
                 "max_tokens": {"type": "integer"},

@@ -18,7 +18,7 @@ people.
 | Deep | 2× AMD RX 9070XT/9060XT (remote) | one llama.cpp Vulkan server across **both** cards, **131k context** | whole-codebase audits, long documents |
 | Night | the same two AMD cards, optionally + adler's 4090 over LAN RPC | Qwen3.8-27B Q5_K_S, **262k native context** | the overnight coder: slow, capable, unattended |
 | Reserve | 64GB DDR5 / 45GB RAM boxes | RAM+CPU hybrid (gpt-oss-120b class), on demand | slow, smarter, 24/7-tolerant jobs |
-| Accurate | RTX PRO 4500 (off-site, barza) | Qwen3.8-27B **Q5_K_S**, 32k ctx, ~35 tok/s | drafting where correctness beats speed |
+| Accurate | RTX PRO 4500 Blackwell (off-site, barza) | Qwen3.8-27B **Q5_K_S**, **262k ctx**, ~35 tok/s | drafting where correctness beats speed; the `ultra` agent |
 | Art | RTX 4090 24GB (remote) | Ideogram 4 / Qwen Edit / Z-Image server | free textures, concepts, key art |
 | 3D | RTX 4080 (swapped) | Hunyuan3D-2 shape gen | concept image → GLB mesh |
 
@@ -51,13 +51,14 @@ pwsh -File scripts\start-cluster.ps1        # starts what is missing, prints the
 
 [opencode](https://opencode.ai) is wired to the cluster's own models — no
 hosted API, no key, no per-token cost. `agent/opencode.json` (deployed to
-`~/.config/opencode/opencode.json`) declares both llama.cpp servers as
-OpenAI-compatible providers and adds three subagents that match the measured
-division of labour:
+`~/.config/opencode/opencode.json`) declares the cluster's llama.cpp servers as
+OpenAI-compatible providers, a second primary agent, and three subagents that
+match the measured division of labour:
 
 | Agent | Model | Job |
 |---|---|---|
 | `build` (default) | specht 131k | drives the work, makes the byte-exact edits |
+| `ultra` | barza Qwen3.8-27B 262k | drives it the `/ultra` way instead, with the same toolbox |
 | `scout` | local 4080 | fast search; reports `file:line`, cannot edit |
 | `auditor` | specht 131k | reads whole files end to end, cannot edit |
 | `drafter` | barza Qwen3.8-27B | self-contained new modules and plans, cannot edit |
@@ -166,8 +167,11 @@ and never recover it; barza never missed it. An easier benchmark
 lesson: a benchmark everything passes is not a measurement.
 
 So `drafter` runs on barza — self-contained artifacts are exactly what it wins
-at — while the primary agent stays on specht for the 131k context, and `scout`
-stays local because search wants speed, not depth.
+at — and `scout` stays local because search wants speed, not depth. The default
+primary stays on specht, which answers fast enough to work with interactively;
+`--agent ultra` moves the driving seat to barza when accuracy is worth more than
+tokens per second — and it brings the same 262k window the night coder has,
+without waiting for night or taking specht off the GLM.
 
 Two commands encode the way this cluster is meant to be worked:
 
@@ -183,7 +187,9 @@ opencode run --command ultra "port the queue to SSE"
 ```
 
 Subagents are reached through the task tool (`--agent` only selects primary
-agents).
+agents). `/ultra` names no agent of its own, so it runs on whichever primary is
+selected: `opencode --agent ultra` runs the same playbook on barza instead of
+specht.
 
 This agent runs **unattended**: `edit`, `bash`, `webfetch` and
 `external_directory` are all `allow`, so `/ultra` completes its verification

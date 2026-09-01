@@ -37,17 +37,17 @@
     },
     "barza": {
       "npm": "@ai-sdk/openai-compatible",
-      "name": "Qwen3.8-27B \u2014 barza, RTX PRO 4500",
+      "name": "Qwen3.8-27B \u2014 barza, RTX PRO 4500 Blackwell",
       "options": {
         "baseURL": "https://185.41.242.227:53018/v1",
         "apiKey": "{file:C:/Users/end/.config/barza-llama.key}"
       },
       "models": {
         "qwen3.8-27b": {
-          "name": "Qwen3.8-27B Q5_K_S (barza, 32k)",
+          "name": "Qwen3.8-27B Q5_K_S (barza, 262k \u2014 the model's hard ceiling)",
           "limit": {
-            "context": 32768,
-            "output": 8192
+            "context": 262144,
+            "output": 32768
           }
         }
       }
@@ -80,6 +80,33 @@
     }
   },
   "agent": {
+    "ultra": {
+      "mode": "primary",
+      "description": "Drives the work itself on barza \u2014 Qwen3.8-27B Q5 at 262k on the RTX PRO 4500 \u2014 with the full cluster toolbox and the /ultra playbook as its standing method. The most accurate node here (51/51 against the GLMs' 47 and 45 on an executed benchmark) and now the largest context, but off-site at ~39 tok/s: hand it depth, not chatter.",
+      "model": "barza/qwen3.8-27b",
+      "temperature": 0.2,
+      "tools": {
+        "task": true,
+        "bash": true,
+        "edit": true,
+        "write": true,
+        "read": true,
+        "grep": true,
+        "glob": true,
+        "list": true,
+        "patch": true,
+        "todowrite": true,
+        "todoread": true,
+        "webfetch": true,
+        "cluster_*": true
+      },
+      "permission": {
+        "edit": "allow",
+        "bash": "allow",
+        "webfetch": "allow"
+      },
+      "prompt": "You are the cluster's coder, running on barza: Qwen3.8-27B at Q5 with a 262,144-token window. You have the whole toolbox \u2014 repository tools, a shell, the scout / auditor / drafter subagents, and the cluster MCP (cluster_status, worker_ask, remote_run, the gen3d and ComfyUI tools). Work every task in four passes, and do not skip one because the task looks small.\n\n1. Map. Send `scout` after every file that matters \u2014 call sites, config, tests, docs \u2014 and ask for file:line references, not prose. Independent areas go out in one batch.\n\n2. Fan out. Delegate each independent piece in parallel: `drafter` for anything self-contained, `auditor` for anything that needs a whole file read end to end, `worker_ask` for bulk reading or summarising that needs no repository tools. Give each one the paths scout found, not a vague description. The hardware is free; your context is the scarce thing.\n\n3. Verify, adversarially. Everything that comes back is a lead, not a finding \u2014 your own recollection included. These workers produce confident, plausible, wrong claims at a real rate. Check each against the actual file, or send a second `auditor` framed to refute it. Drop what does not survive, and say what you dropped.\n\n4. Land it. Read a file before you edit it and change only the lines you mean to; never reproduce a file you have not just read in full. Then verify by running the thing \u2014 start the server, call the endpoint, open the page \u2014 not by reasoning about it.\n\nReport what you changed, what you verified and how, what you dropped in pass 3, and anything you deliberately left out."
+    },
     "scout": {
       "mode": "subagent",
       "description": "Fast codebase search on the local 4080. Finds files, symbols and call sites and reports paths with line numbers. Use it instead of reading many files yourself.",

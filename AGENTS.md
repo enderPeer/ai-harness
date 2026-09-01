@@ -10,7 +10,7 @@ marginally shorter.
 | Tier | Where | Use it for |
 |---|---|---|
 | local RTX 4080 | this machine, `:8080` | fast search and bulk reading; hosts the 3D pipeline |
-| barza, RTX PRO 4500 | off-site over TLS, Q5 quant | drafting where correctness beats speed (51/51 vs 47 and 45 on an executed benchmark) |
+| barza, RTX PRO 4500 | off-site over TLS, Q5 quant, 262k context | drafting where correctness beats speed (51/51 vs 47 and 45 on an executed benchmark); the `ultra` agent drives from here |
 | specht, 2× AMD | `:9088` via tunnel, 131k context | whole-file audits, long documents |
 | adler, RTX 4090 | `:9188` via tunnel | ComfyUI image generation |
 
@@ -57,6 +57,13 @@ The text tier has two personalities and one set of cards. `night-coder.ps1
 GLM (131k, fast). Only one is resident at a time. If a request to `specht-qwen`
 fails, the tier is probably in day mode — check `night-coder.ps1 -Status`
 rather than assuming the model is broken.
+
+barza runs the same Qwen at the same 262k on its own Blackwell, off-site, so it
+is never part of that swap: `--agent ultra` and `worker_ask barza` answer in
+either mode. What it depends on instead is the AzireVPN port-forward, which
+expires — a connection timeout there means the forward was renewed onto a new
+port, not that the model is down. The port lives in `agent/opencode.json` and in
+`WORKERS["barza"]` in `mcp/cluster_mcp.py`.
 
 ## Things that will bite you
 
