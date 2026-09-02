@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "model": "specht/glm-4.7-flash-131k",
+  "model": "specht-qwen/qwen3.8-27b",
   "small_model": "local4080/glm-4.7-flash",
   "provider": {
     "local4080": {
@@ -121,8 +121,8 @@
     },
     "auditor": {
       "mode": "subagent",
-      "description": "Whole-file and whole-subsystem review using specht's 131k context. Reads large files end to end and reports concrete defects. Read-only.",
-      "model": "specht/glm-4.7-flash-131k",
+      "description": "Whole-file and whole-subsystem review on the 262k night coder (Qwen3.8-27B on specht). Reads large files end to end and reports concrete defects. Read-only.",
+      "model": "specht-qwen/qwen3.8-27b",
       "temperature": 0.1,
       "permission": {
         "edit": "deny",
